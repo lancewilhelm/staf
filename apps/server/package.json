@@ -1,0 +1,16 @@
+{
+  "name": "@staf/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "staf": "./src/main.ts" },
+  "scripts": {
+    "dev": "bun --watch src/main.ts serve",
+    "build": "NODE_ENV=production bun build src/main.ts --compile --minify --define process.env.NODE_ENV='\"production\"' --outfile ../../dist/staf",
+    "build:all": "for t in bun-darwin-arm64 bun-darwin-x64 bun-linux-arm64 bun-linux-x64; do NODE_ENV=production bun build src/main.ts --compile --minify --define process.env.NODE_ENV='\"production\"' --target=$t --outfile ../../dist/staf-${t#bun-}; done",
+    "codex-types": "sh scripts/codex-types.sh"
+  },
+  "dependencies": {
+    "@staf/protocol": "workspace:*"
+  }
+}

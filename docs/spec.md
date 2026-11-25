@@ -176,4 +176,12 @@ Later: voice, an Expo app, Hermes as a harness, and more plugins.
 | Host memory at idle | under 100 MB |
 | Web app, gzipped | under 200 KB |
 
-These are targets, not measurements. Measure them at the end of each slice.
+These are targets. Measure them at the end of each slice.
+
+Measured after slice 1a (macOS arm64, Bun 1.4.5):
+
+| Measure | Result |
+|---|---|
+| Compiled binary | 90 MB, nearly all of it the Bun runtime |
+| Host memory at idle | 24 MB |
+| Web app, gzipped | 99 KB of JavaScript and 3 KB of CSS |

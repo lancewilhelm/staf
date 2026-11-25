@@ -1,0 +1,16 @@
+{
+  "name": "staf",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "bun run --cwd apps/server dev",
+    "test": "bun test",
+    "typecheck": "tsc -p packages/protocol && tsc -p apps/server && tsc -p apps/web",
+    "build": "bun run --cwd apps/server build"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.5",
+    "typescript": "7.0.2"
+  }
+}
