@@ -31,7 +31,7 @@ defaults shown.
 | Field | Default | Meaning |
 |---|---|---|
 | `name` | `"Staf"` | The name shown for the agent. |
-| `harness` | `"codex"` | Which harness runs the agent: `codex`, `antigravity`, or `claude`. See below. |
+| `harness` | `"codex"` | Which harness runs the agent: `codex`, `antigravity`, or `claude`. See below. (Planned for slice 1d: this becomes the default, and each new conversation can pick another provider.) |
 | `model` | `null` | A model to request, such as `"gemini-4-neon-low"` or `"claude-sonnet-5-5"`, or `null` for the harness default. |
 | `network` | `true` | Whether commands that the agent runs can reach the network. Web search works either way. |
 | `harnessApps` | `[]` | Apps that come with the harness account, by name or ID. See below. |

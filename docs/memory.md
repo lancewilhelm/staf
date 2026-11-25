@@ -1,41 +1,86 @@
 # Memory (Planned)
 
-This is a design for how Staf agents remember things across conversations. Nothing here
-is built yet. It is planned for slice 3, together with the Staf MCP server. Open
-questions are listed at the end.
+This is the design for how a Staf agent remembers things across conversations. Nothing
+here is built yet. Memory v1 is planned for slice 3, together with the Staf MCP server.
+
+Memory v1 copies the built-in memory of Hermes, which has worked well in daily use.
+Larger systems, such as one modeled on Hindsight, are planned for later (see the end).
 
 ## Goals
 
-- An agent remembers facts that matter to the household: names, places, preferences,
-  routines, and decisions. It does not need to be told again in every conversation.
-- Memory works the same way on every harness, so moving an agent from Codex to Claude
-  does not make it forget.
-- Each person has private memory, and the household has shared memory. the second person's agents
-  never read the owner's private memory, and the other way around.
+- An agent remembers what matters: names, places, preferences, routines, and decisions.
+  It does not need to be told again in every conversation.
+- Memory works the same way on every harness. An agent that moves from Codex to Claude,
+  or a conversation started on a different provider, keeps the same memory.
 - People can see, correct, and delete every memory, in the web app and the CLI.
 - Text that arrives from outside, such as email and web pages, cannot write memory on its
   own. That would let a prompt injection plant instructions that last.
 
+## Memory belongs to one agent
+
+Each agent has its own memory. Two agents never read each other's memory, even when the
+same person owns both. There is no household or shared memory for now; it can be added
+later if a real need appears.
+
+Why: per-agent memory is the easiest to understand. What an agent knows is what it was
+told in its own conversations. Because memory lives in Staf and not in a harness, it
+still follows the agent to any provider.
+
 ## Harness memory stays off
 
-Each harness has its own memory feature, but those features belong to the harness
-account, which the household shares, and Staf cannot see or scope them.
+Each harness has its own memory feature. Those features belong to the harness account or
+data folder, not to a Staf agent, and Staf cannot see or scope them. Slice 1d turns them
+off:
 
-| Harness | Its memory feature | Status in Staf |
+| Harness | Its memory feature | Change in slice 1d |
 |---|---|---|
-| Codex | `memories` feature | Off (the default in Staf's Codex home). Staf should set it off explicitly. |
-| Claude | Auto-memory | Off, because Staf runs Claude with `--safe-mode`. |
-| Antigravity | Knowledge in `brain/` and `implicit/` | On, and shared by every Antigravity agent through Staf's Antigravity folder. Turn it off, or give each person their own folder, before slice 5 adds the second person. |
+| Codex | `memories` feature | Set it off explicitly (today it is off only by default). |
+| Claude | Auto-memory | None needed: `--safe-mode` already turns it off. |
+| Antigravity | Knowledge in `brain/` and `implicit/` | Turn it off. Today every Antigravity agent shares it through Staf's Antigravity folder. |
 
-## Scopes
+## What the agent sees: two small blocks
 
-| Scope | Who can read it | Example |
+Like Hermes, each agent has two blocks of short entries. Both go into the instructions
+at the start of every conversation:
+
+| Block | Holds | Default limit |
 |---|---|---|
-| Household | Every agent of every person | "We live in Lisbon." "Trash pickup is Tuesday morning." |
-| Personal | The agents of one person | "the owner runs in the morning and avoids uneven trails." |
-| Agent | One agent | Notes that the agent keeps for its own job. These are files in its workspace, so they need no new system. |
+| **Notes** | What the agent learned about its work and surroundings: how a task is done, where things are, what failed before | 2,200 characters (about 800 tokens) |
+| **Profile** | What the agent knows about its person: preferences, routines, people, places | 1,375 characters (about 500 tokens) |
 
-Until slice 5 adds people, everything belongs to the household's one account.
+These are the Hermes defaults (`memory_char_limit` and `user_char_limit`). The limits can
+be changed per agent in the settings window. Small limits keep every message cheap and
+force the agent to keep only what matters. When a block is full, the agent must merge or
+remove entries before it adds one.
+
+The blocks are copied into a conversation when it starts and do not change during it.
+A memory saved in one conversation appears in the next one. This matches Hermes and
+keeps each harness session's instructions stable.
+
+## Looking things up: conversation search
+
+The blocks are small on purpose. For anything else, the agent searches its own past
+conversations with the Staf tool `conversation_search`, which uses SQLite's built-in
+full-text search (FTS5) over the messages that Staf already stores. Hermes has the same
+tool (`session_search`).
+
+## How memory is written
+
+1. **The agent saves it.** The Staf tool `memory` adds, changes, or removes an entry in
+   one block, like the Hermes tool. The agent saves what the person asks it to remember,
+   and what it judges worth keeping.
+2. **A reminder.** Every 10 messages from the person, Staf adds a short reminder for the
+   agent to consider saving something (Hermes's `nudge_interval`, adjustable in settings).
+3. **Runs that read outside content can only propose.** A job that reads email, for
+   example, cannot change memory directly. Its changes become proposals in the inbox,
+   and the person approves, edits, or rejects them. Staf enforces this in the tool,
+   based on the run's token, not on the model's judgment.
+4. **People edit directly** in the agent's memory view in the web app, or with
+   `staf memory`.
+5. **Entries are checked before they reach the instructions.** Like Hermes, Staf scans
+   entries for text that looks like injected instructions and shows a warning in their
+   place instead of passing them to the model. The person still sees the original
+   entry and can delete it.
 
 ## Storage
 
@@ -44,47 +89,36 @@ A `memories` table in `staf.db`:
 | Column | Meaning |
 |---|---|
 | `id` | Unique ID |
-| `scope` | `household`, or `person:<id>` |
-| `text` | One fact in one or two sentences |
-| `status` | `active`, `proposed` (waiting for approval), or `archived` |
+| `agent_id` | The agent that owns the entry |
+| `block` | `notes` or `profile` |
+| `text` | The entry |
+| `status` | `active` or `proposed` (waiting for approval) |
 | `source` | Where it came from: a person, or a thread or job and its message |
-| `created_at`, `updated_at`, `last_used_at` | Times, for review and cleanup |
+| `created_at`, `updated_at` | Times |
 
-SQLite's built-in full-text search (FTS5) handles lookups. Embeddings can come later if
-full-text search turns out not to be enough; they would add a model call and storage.
+Deleting an agent deletes its memory.
 
-## How agents read memory
+## Importing from another system (later)
 
-1. **A short profile in every run.** Staf adds the most important active memories for the
-   person and the household to the instructions that it already passes to every harness,
-   up to a fixed size (about 2,000 tokens). This needs no tools, so it works on every
-   harness from the start.
-2. **Search when needed.** A Staf MCP tool, `memory_search`, lets the agent look up
-   anything beyond the profile.
+Someone who comes from another assistant may want to bring their memories along. A later
+`staf memory import` reads a simple file of entries (plain text or JSON) and adds them to
+one agent as proposals to review. Staf will not import from Hermes automatically.
 
-## How memory is written
+## Later: a larger memory system
 
-1. **The person asks.** "Remember that the dentist is Dr. Reyes." The agent calls the
-   Staf tool `memory_save`. Because the request came from the person in chat, the memory
-   is saved as active.
-2. **The agent notices something.** The agent calls `memory_propose`. The proposal
-   becomes an inbox item, and the person approves, edits, or rejects it.
-3. **Jobs that read outside content,** such as inbox monitoring, can only propose. Staf
-   enforces this in the tool, based on the run's token, not on the model's judgment.
-4. **People edit directly** on a Memory page in the web app, or with `staf memory`.
+Memory is what makes an agent more useful over time, so v1 is a starting point. A later
+phase will:
 
-## Order of work
-
-1. The table, the profile in the instructions, and the Memory page, so that people can
-   add memories by hand. This could come before the MCP server.
-2. The MCP tools (`memory_search`, `memory_save`, `memory_propose`) with slice 3.
-3. Proposals in the inbox with slice 2's inbox.
-4. Personal scopes with slice 5.
+1. Survey memory systems such as Hindsight, Mem0, Letta, Zep/Graphiti, and Supermemory:
+   how each decides what to keep, how it recalls, and what it costs to run.
+2. Set up benchmarks: public ones (LongMemEval, LoCoMo) and a small set of Staf
+   scenarios. Does the agent recall the right fact when it matters, stay quiet when a
+   memory is not relevant, notice a changed fact, and refuse a "memory" planted in an
+   email?
+3. Build a Hindsight-like system inside Staf, with middle options between v1 and that.
+   Memory v1 sits behind a small interface so that a new system can replace it.
 
 ## Open questions
 
-- Should Staf import memories from Hermes (`~/.hermes/memories`) once, as proposals to
-  review?
-- How should old memories be retired: by age, by `last_used_at`, or only by hand?
-- When a household fact and a personal fact disagree, which one wins in the profile?
-- Is the profile's fixed size right, or should it depend on the harness's context size?
+- How should old entries be retired once blocks are full and conversation search grows:
+  by age, or only by the agent and by hand?

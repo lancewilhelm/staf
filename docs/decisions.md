@@ -3,6 +3,43 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Memory belongs to one agent and starts with the Hermes design
+
+Each agent has its own memory, and nothing is shared between agents or people for now.
+Memory v1 copies Hermes's built-in memory: a notes block of 2,200 characters and a
+profile block of 1,375 characters in every conversation's instructions, plus full-text
+search over past conversations. The limits can be changed in settings. A
+Hindsight-like system comes later.
+
+Why: shared memory makes it hard to tell why an agent knows something. The Hermes limits
+have worked well in daily use and give a known starting point to measure against.
+
+## 2026-11-25: The provider is chosen per conversation
+
+A pill next to the composer picks the provider and model for a new conversation. The
+agent's setting is only the default. A conversation stays on the provider it started
+with.
+
+Why: an agent's instructions, workspace, and memory live in Staf, so one agent can use
+any provider. Separate agents per provider would split its memory.
+
+## 2026-11-25: No scheduled jobs on Antigravity for now
+
+Jobs run on Codex or Claude. Antigravity is for conversations that a person starts, and
+the web app marks it as experimental.
+
+Why: there are reports of Google suspending Antigravity access for automated use,
+including one case that used only the official `agy` program started by another local
+program. Steady scheduled traffic is the pattern that these reports describe.
+
+## 2026-11-25: Deleting a conversation deletes the harness's copy too
+
+Each harness keeps its own transcript of a conversation. When a person deletes a
+conversation in Staf, Staf deletes that transcript as well.
+
+Why: a person who deletes a conversation expects it to be gone. Claude's copy lives in
+`~/.claude/projects/`, where nobody would think to look.
+
 ## 2026-11-25: Antigravity and Claude use the person's own sign-in
 
 Codex has a separate Staf sign-in. Antigravity and Claude use the sign-in that already
