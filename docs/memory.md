@@ -10,8 +10,8 @@ Larger systems, such as one modeled on Hindsight, are planned for later (see the
 
 - An agent remembers what matters: names, places, preferences, routines, and decisions.
   It does not need to be told again in every conversation.
-- Memory works the same way on every harness. An agent that moves from Codex to Claude,
-  or a conversation started on a different provider, keeps the same memory.
+- Memory works the same way on every harness. An agent that moves from Codex to Claude
+  keeps the same memory.
 - People can see, correct, and delete every memory, in the web app and the CLI.
 - Text that arrives from outside, such as email and web pages, cannot write memory on its
   own. That would let a prompt injection plant instructions that last.
