@@ -34,8 +34,8 @@ lack: household integrations, schedules, an inbox, approvals, and a simple inter
 | Concept | Meaning |
 |---|---|
 | **Person** | A member of the household. Each person owns their own threads, agents, jobs, and inbox. |
-| **Agent** | A folder with settings (`agent.json`), instructions (`AGENTS.md`), and a `workspace/` that the agent works in. Settings choose the harness and model behind it, network access, harness apps, and extra writable folders. Each agent has its own memory ([memory.md](memory.md)). See [agents.md](agents.md). |
-| **Thread** | A chat conversation with one agent, on the provider and model that the agent had when the conversation started. A thread stays on one harness session. |
+| **Agent** | A folder with settings (`agent.json`), instructions (`AGENTS.md`), and a `workspace/` that the agent works in. Settings choose its default harness and model, network access, harness apps, and extra writable folders. Each agent has its own memory ([memory.md](memory.md)). See [agents.md](agents.md). |
+| **Thread** | A chat conversation with one agent. It starts on the agent's default provider and model, and the person can change them during the conversation. A thread stays on one harness session. |
 | **Job** | A run of an agent that a schedule or a trigger starts, such as "every day at 05:30" or "a new email arrived". |
 | **Inbox item** | Something that needs a person's attention: a job result, an approval request, or an alert. |
 | **Plugin** | An integration, such as Gmail. A plugin adds MCP tools, triggers, and a setup flow. |
@@ -163,23 +163,32 @@ Each slice is used live before the next one starts.
    - 1c: Claude through stream-JSON mode. Done.
    - 1d: agents, settings, and cleanup. Next.
      - **Agents are profiles.** An agent is a named assistant with its own
-       instructions, workspace, memory, and the provider and model behind it. Making a
-       new agent is how a person gets a different provider, model, or job, such as
-       "Staf" on Claude for everyday questions or "Paper" on ChatGPT for the newspaper.
-     - **The pill.** A small pill next to the composer shows the agent and its model, for
-       example "Staf · Claude Sonnet". It opens a short menu to pick the agent for a new
-       conversation. Once a conversation has started, the pill shows its agent and model
-       but cannot change them, because a harness session cannot move to another harness.
+       instructions, workspace, and memory, and a default provider and model. For
+       example, "Staf" for everyday questions and "Paper" for the newspaper.
+     - **The pill.** A small pill next to the composer shows the agent, provider, and
+       model, for example "Staf · Claude Sonnet". Its menu picks the agent for a new
+       conversation, and the provider and model for this conversation. A new
+       conversation starts with the agent's defaults.
+     - **Changing the model or provider during a conversation.**
+       - Another model on the same provider applies from the next message, in the same
+         harness session.
+       - Another provider starts a new harness session, because a session cannot move
+         between harnesses. Staf gives the new session the earlier conversation as text,
+         and the thread shows a divider such as "Switched to Claude". The new provider
+         sees the earlier questions and answers, but not the details of earlier steps,
+         such as command output.
+       - A conversation remembers its own provider and model, so reopening it continues
+         where it left off.
      - **Settings window.** A popup with two sections:
        - **Agents:** create, edit, and delete agents. Each has a name, instructions,
-         provider, model, network access, and writable folders. Each provider's models
+         default provider and model, network access, and writable folders. Each provider's models
          come from the harness where it can list them (Codex `model/list`, ACP
          `session/new`), and from a fixed list of aliases for Claude. Memory limits are
          added here in slice 3.
        - **Providers:** sign-in status, signing in to Codex, and how to sign in to
          Claude and Antigravity, which use the machine's own sign-in.
-     - **Provider notes.** Choosing a provider for an agent shows one short line about how
-       it differs, such as "Gemini: commands can't reach the internet, and Google may
+     - **Provider notes.** Choosing a provider, for an agent or in the pill, shows one
+       short line about how it differs, such as "Gemini: commands can't reach the internet, and Google may
        suspend accounts that use it for automation." Gemini is marked experimental.
      - **Clean up the test agents.** The `claude` and `gemini` agents from slice 1 only
        differ by provider. They are removed, and their conversations move to the default

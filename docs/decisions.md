@@ -14,16 +14,17 @@ Hindsight-like system comes later.
 Why: shared memory makes it hard to tell why an agent knows something. The Hermes limits
 have worked well in daily use and give a known starting point to measure against.
 
-## 2026-11-25: An agent is a profile with its own provider and model
+## 2026-11-25: An agent is a profile with a default provider and model
 
-An agent is a named assistant: instructions, a workspace, memory, and the provider and
-model behind it. People create and edit agents in the settings window, and a pill next
-to the composer picks the agent for a new conversation. To use another provider, a
-person makes or picks another agent; a conversation does not switch providers on its
-own.
+An agent is a named assistant: instructions, a workspace, memory, and a default
+provider and model. People create and edit agents in the settings window. A pill next to
+the composer picks the agent, and it can change the provider and model for one
+conversation, also in the middle of it. When the provider changes, Staf starts a new
+harness session and passes it the earlier conversation as text.
 
 Why: an agent is something a person talks to and gives jobs to, not a provider
-setting. Agents that differ only by provider would split memory for no reason.
+setting. Agents that differ only by provider would split memory for no reason. Staf
+stores every conversation itself, so it can hand a conversation to another provider.
 
 ## 2026-11-25: No scheduled jobs on Antigravity for now
 
