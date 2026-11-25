@@ -7,6 +7,8 @@ export type HarnessEvent =
   | { type: "session"; sessionId: string }
   /** Append text to the answer. */
   | { type: "text"; text: string }
+  /** Replace the whole answer text, for example after commentary moves into a step. */
+  | { type: "text.set"; text: string }
   /** Add or update one step. Activities with the same ID replace each other. */
   | { type: "activity"; activity: Activity };
 

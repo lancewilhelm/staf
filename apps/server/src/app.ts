@@ -4,6 +4,8 @@ import { Agents } from "./agents.ts";
 import { EventBus } from "./bus.ts";
 import { ChatService } from "./chat.ts";
 import type { Paths } from "./config.ts";
+import { antigravityAdapter } from "./harness/acp/antigravity.ts";
+import { ClaudeAdapter } from "./harness/claude/adapter.ts";
 import { CodexAdapter } from "./harness/codex/adapter.ts";
 import { FakeHarness } from "./harness/fake.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
@@ -45,6 +47,8 @@ export function createApp(options: AppOptions): App {
     options.harnesses ??
     [
       new CodexAdapter({ codexHome: paths.codexHome }),
+      antigravityAdapter({ home: paths.antigravityHome }),
+      new ClaudeAdapter(),
       ...(options.harnessOverride === "fake" ? [new FakeHarness({ delayMs: 40 })] : []),
     ];
   const harnesses = new Map(list.map((harness) => [harness.id, harness]));
@@ -54,6 +58,7 @@ export function createApp(options: AppOptions): App {
     hostname: options.hostname,
     port: options.port,
     chat,
+    agents,
     bus,
     harnesses,
     web: options.web,

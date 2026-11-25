@@ -31,14 +31,38 @@ defaults shown.
 | Field | Default | Meaning |
 |---|---|---|
 | `name` | `"Staf"` | The name shown for the agent. |
-| `harness` | `"codex"` | Which harness runs the agent. Only `codex` exists so far. |
-| `model` | `null` | A model to request, or `null` for the harness default. |
+| `harness` | `"codex"` | Which harness runs the agent: `codex`, `antigravity`, or `claude`. See below. |
+| `model` | `null` | A model to request, such as `"gemini-4-neon-low"` or `"claude-sonnet-5-5"`, or `null` for the harness default. |
 | `network` | `true` | Whether commands that the agent runs can reach the network. Web search works either way. |
 | `harnessApps` | `[]` | Apps that come with the harness account, by name or ID. See below. |
 | `writableFolders` | `[]` | Extra folders that the agent may write to, as absolute paths or paths starting with `~/`. |
 
 If `agent.json` has a problem, Staf refuses to start a conversation with that agent and
 says what is wrong.
+
+### Harnesses
+
+| `harness` | Runs | Sign-in |
+|---|---|---|
+| `codex` | ChatGPT through `codex app-server` | Staf's own: `staf login codex` |
+| `antigravity` | Gemini through `agy acp` | Your Antigravity sign-in (run `agy` once) |
+| `claude` | Claude through `claude -p` | Your Claude Code sign-in (run `claude` once) |
+
+The harnesses do not support every setting in the same way:
+
+| Setting | Codex | Antigravity | Claude |
+|---|---|---|---|
+| `network` | Yes | **No**: commands never reach the network. Its own web search still works. | Yes |
+| `harnessApps` | Yes | Not applicable | Not applicable |
+| `writableFolders` | Yes | **No**: the agent can write only to its workspace, and the answer shows a note. | Yes |
+
+In every harness, commands run in the harness's sandbox, file changes outside the
+workspace and the writable folders are refused, and the agent's own instructions come
+from `AGENTS.md`. Staf keeps the person's own setup for each harness (global
+instructions, hooks, skills, plugins, and MCP servers) out of Staf runs.
+
+When Staf refuses a step on Antigravity, Antigravity ends the answer there. The answer
+then says which step Staf refused.
 
 ### Harness apps
 
@@ -57,7 +81,10 @@ Allowed apps cannot take actions that the app marks as destructive, such as send
 deleting. Searching and reading still work. If a name does not match a connected app,
 the answer shows a "Skipped the app" step, and the conversation continues without it.
 
-Codex's computer use, browser use, and plugin features are always off in Staf.
+Codex's computer use, browser use, and plugin features are always off in Staf. For
+Claude, Staf allows only these built-in tools: Bash, Read, Edit, Write, WebSearch,
+WebFetch, and Skill. Claude account features such as publishing pages, remote triggers,
+and push notifications are off.
 
 ### Writable folders
 
@@ -92,6 +119,16 @@ An agent that only answers from the web, with no network access for its own comm
 }
 ```
 
+A Gemini agent that uses a faster model:
+
+```json
+{
+  "name": "Gemini",
+  "harness": "antigravity",
+  "model": "gemini-4-neon-low"
+}
+```
+
 ## Creating an agent
 
 There is no screen for this yet. Create the folder by hand:
@@ -102,6 +139,8 @@ echo '{ "name": "Travel", "harnessApps": ["Expedia"] }' > ~/.staf/agents/travel/
 echo "You help plan trips. Prefer refundable options." > ~/.staf/agents/travel/AGENTS.md
 staf ask --agent travel "Find a hotel in Lisbon for December 12."
 ```
+
+In the web app, new agents appear as choices under the box on the new-chat screen.
 
 Staf creates the `workspace/` folder the first time the agent runs. Changes to
 `agent.json` and `AGENTS.md` apply to the next message; you do not need to restart Staf.

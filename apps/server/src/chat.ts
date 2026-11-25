@@ -39,10 +39,15 @@ export class ChatService {
   createThread(agentId = DEFAULT_AGENT_ID): ThreadSummary {
     const agent = this.loadAgent(agentId);
     if (!agent) throw new ChatError(404, `There is no agent named "${agentId}".`);
+    const harness = this.harnessOverride ?? agent.harness;
+    if (!this.harnesses.has(harness)) {
+      const known = [...this.harnesses.keys()].join(", ");
+      throw new ChatError(409, `The agent "${agent.id}" uses the harness "${harness}", which Staf does not have. Use one of: ${known}.`);
+    }
     const thread = this.store.createThread({
       title: "New chat",
       agentId: agent.id,
-      harness: this.harnessOverride ?? agent.harness,
+      harness,
     });
     const summary = publicThread(thread);
     this.bus.publish({ type: "thread.upserted", thread: summary });
@@ -176,6 +181,11 @@ export class ChatService {
           live.text = text;
           this.bus.publish({ type: "message.delta", threadId, messageId: message.id, text: event.text });
           if (Date.now() - lastSave > SAVE_INTERVAL_MS) save();
+          return;
+        case "text.set":
+          text = event.text;
+          live.text = text;
+          this.bus.publish({ type: "message.text", threadId, messageId: message.id, text });
           return;
         case "activity": {
           const activity = mergeActivity(activities, event.activity);

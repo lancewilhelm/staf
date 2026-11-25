@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StafClient, type StreamEvent } from "@staf/protocol";
@@ -116,6 +116,25 @@ describe("chat over HTTP", () => {
     expect(steps).toEqual(["Searched: Ping"]);
   });
 
+  test("the CLI prints commentary once, and the web state drops it from the answer", async () => {
+    const { client, app } = start(new FakeHarness({ commentary: true }));
+    const thread = await client.createThread();
+    let printed = "";
+    const steps: string[] = [];
+    const message = await streamAnswer(client, thread.id, "Ping", {
+      text: (chunk) => (printed += chunk),
+      activity: (activity) => steps.push(activity.title),
+    });
+    expect(printed).toBe("Let me look.\nYou said: **Ping**");
+    expect(steps).toEqual(["Searched: Ping"]);
+    expect(message.text).toBe("You said: **Ping**");
+    await app.chat.idle();
+    expect((await client.getThread(thread.id)).messages[1]!.activities.map((a) => a.title)).toEqual([
+      "Let me look.",
+      "Searched: Ping",
+    ]);
+  });
+
   test("deletes a thread and its messages", async () => {
     const { client, app } = start();
     const thread = await client.createThread();
@@ -132,6 +151,23 @@ describe("chat over HTTP", () => {
     await expect(client.sendMessage(thread.id, "   ")).rejects.toMatchObject({ status: 400 });
     await expect(client.createThread({ agentId: "../etc" })).rejects.toMatchObject({ status: 404 });
     await expect(client.sendMessage("missing", "hi")).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("agents", () => {
+  test("lists agents with their harness, and refuses an unknown harness", async () => {
+    const { client, paths } = start();
+    mkdirSync(join(paths.agents, "odd"));
+    writeFileSync(join(paths.agents, "odd", "agent.json"), JSON.stringify({ name: "Odd", harness: "nope" }));
+    mkdirSync(join(paths.agents, "broken"));
+    writeFileSync(join(paths.agents, "broken", "agent.json"), "{");
+
+    const agents = await client.listAgents();
+    // The default agent comes first; an agent with broken settings is left out.
+    expect(agents.map((a) => a.id)).toEqual(["default", "odd"]);
+    expect(agents[0]).toMatchObject({ name: "Staf", harness: "codex" });
+
+    await expect(client.createThread({ agentId: "broken" })).rejects.toMatchObject({ status: 409 });
   });
 });
 

@@ -1,6 +1,7 @@
 // A small API client that works in browsers, Bun, and (later) React Native.
 
 import type {
+  AgentSummary,
   ApiErrorBody,
   CreateThreadRequest,
   HealthInfo,
@@ -34,6 +35,10 @@ export class StafClient {
 
   health(): Promise<HealthInfo> {
     return this.request("GET", "/api/health");
+  }
+
+  listAgents(): Promise<AgentSummary[]> {
+    return this.request("GET", "/api/agents");
   }
 
   listThreads(): Promise<ThreadSummary[]> {

@@ -33,6 +33,10 @@ export async function streamAnswer(
 
     let messageId: string | null = null;
     const printed = new Set<string>();
+    // A terminal cannot take back text. When streamed text turns out to be commentary,
+    // it stays on screen, so its step line is not printed again.
+    let segment = "";
+    const retracted = new Set<string>();
     try {
       for (;;) {
         const event = await next();
@@ -44,12 +48,20 @@ export async function streamAnswer(
         }
         if (!messageId) continue;
         if (event.type === "message.delta" && event.messageId === messageId) {
+          segment += event.text;
           out.text(event.text);
+        } else if (event.type === "message.text" && event.messageId === messageId) {
+          if (segment.trim()) {
+            retracted.add(segment.trim());
+            if (!segment.endsWith("\n")) out.text("\n");
+          }
+          segment = event.text;
         } else if (event.type === "message.activity" && event.messageId === messageId) {
           const { activity } = event;
           if (activity.status !== "running" && !printed.has(activity.id)) {
             printed.add(activity.id);
-            out.activity(activity);
+            const repeat = activity.kind === "note" && retracted.has((activity.detail ?? activity.title).trim());
+            if (!repeat) out.activity(activity);
           }
         } else if (event.type === "message.completed" && event.message.id === messageId) {
           return event.message;

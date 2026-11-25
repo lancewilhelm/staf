@@ -10,7 +10,7 @@ export class FakeHarness implements HarnessAdapter {
   readonly label = "Fake harness";
   readonly requests: TurnRequest[] = [];
 
-  constructor(private readonly options: { delayMs?: number; fail?: string } = {}) {}
+  constructor(private readonly options: { delayMs?: number; fail?: string; commentary?: boolean } = {}) {}
 
   async status(): Promise<HarnessInfo> {
     return { id: this.id, label: this.label, ready: true };
@@ -22,6 +22,15 @@ export class FakeHarness implements HarnessAdapter {
     const sessionId = request.sessionId ?? `fake-${crypto.randomUUID()}`;
     if (!request.sessionId) request.emit({ type: "session", sessionId });
 
+    if (this.options.commentary) {
+      // Like Claude and Antigravity: text that turns out to be commentary moves into a step.
+      request.emit({ type: "text", text: "Let me look." });
+      request.emit({ type: "text.set", text: "" });
+      request.emit({
+        type: "activity",
+        activity: { id: "note-1", kind: "note", title: "Let me look.", status: "done", startedAt: Date.now() },
+      });
+    }
     const startedAt = Date.now();
     const activity = {
       id: "search-1",

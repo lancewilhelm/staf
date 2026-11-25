@@ -99,8 +99,8 @@ stream normalized events, interrupt the turn, and report whether the harness is 
 | Harness | Transport | Instructions | Staf tools |
 |---|---|---|---|
 | Codex | `codex app-server`, JSON-RPC lines over stdio | `developerInstructions` on `thread/start` and `thread/resume` | Per-thread `config` that adds the Staf MCP bridge |
-| Antigravity | `agy acp` | `AGENTS.md` in the agent folder | `mcpServers` in ACP `session/new` |
-| Claude | `claude --input-format stream-json --output-format stream-json` | `--append-system-prompt` | `--mcp-config`, with approvals through `--permission-prompt-tool` |
+| Antigravity | `agy acp --sandbox --gemini-dir <Staf's folder>` | `_meta.antigravity.systemPrompt.append` on `session/new` | `mcpServers` in ACP `session/new` |
+| Claude | `claude -p --output-format stream-json --safe-mode`, one process per turn | `--append-system-prompt` | `--mcp-config` (check that it works with `--safe-mode`) |
 | Hermes (optional) | `hermes acp` | `AGENTS.md` | ACP `mcpServers` |
 
 Agent settings reach the harness as one neutral `access` value (network, harness apps,
@@ -158,13 +158,13 @@ the same way whichever harness made the call.
 Each slice is used live before the next one starts.
 
 1. **Chat.**
-   - 1a: web chat and CLI on Codex, with streaming answers and collapsible activity.
-   - 1b: Antigravity through a generic ACP adapter.
-   - 1c: Claude through stream-JSON mode.
+   - 1a: web chat and CLI on Codex, with streaming answers and collapsible activity. Done.
+   - 1b: Antigravity through a generic ACP adapter. Done.
+   - 1c: Claude through stream-JSON mode. Done.
 2. **Jobs and the inbox.** Schedules, job runs, inbox items with attachments, and a
    port of the `morning-intel` skill from Hermes.
-3. **The Staf MCP server** with run tokens, plus the first Staf tools (inbox delivery,
-   memory).
+3. **The Staf MCP server** with run tokens, plus the first Staf tools: inbox delivery,
+   and memory as designed in [memory.md](memory.md).
 4. **Gmail.** Setup, a trigger for new mail, inbox monitoring, the personal feed that
    `morning-intel` reads, and approvals for sending mail.
 5. **People.** A second person's account, their own agents and jobs, and per-person scoping.
@@ -174,6 +174,12 @@ Each slice is used live before the next one starts.
 Later: voice, an Expo app, Hermes as a harness, and more plugins.
 
 ## Known gaps
+
+- On Antigravity, commands cannot reach the network and the agent cannot write to
+  `writableFolders`, because the only way past agy's sandbox is a bypass that also lifts
+  the file limits.
+- Claude's transcripts are stored in `~/.claude/projects/`, outside Staf's data folder.
+- How Antigravity and Claude sign in on a headless Linux server is untested.
 
 - Codex sometimes runs commands through its `exec` tool ("code mode"), which runs a
   short script. The app server does not report those calls, so they do not appear in

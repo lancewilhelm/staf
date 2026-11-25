@@ -1,9 +1,10 @@
 // JSON-RPC over the stdin and stdout of a child process, one JSON message per line.
-// Codex app-server omits the "jsonrpc" field, so this client does too.
+// Codex app-server omits the "jsonrpc" field; ACP agents expect "jsonrpc": "2.0".
 
 type Json = unknown;
 
 interface RpcMessage {
+  jsonrpc?: "2.0";
   id?: number | string;
   method?: string;
   params?: Json;
@@ -38,12 +39,22 @@ export class RpcProcess {
   private stderrTail = "";
   private exited = false;
 
+  private readonly jsonrpc: boolean;
+
   constructor(
     command: string[],
     env: Record<string, string | undefined>,
     private readonly handlers: RpcHandlers,
+    options: { jsonrpc?: boolean; cwd?: string } = {},
   ) {
-    this.proc = Bun.spawn(command, { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
+    this.jsonrpc = options.jsonrpc ?? false;
+    this.proc = Bun.spawn(command, {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    });
     void this.readStdout();
     void this.readStderr();
     void this.proc.exited.then((code) => {
@@ -78,7 +89,8 @@ export class RpcProcess {
 
   private write(message: RpcMessage): void {
     if (this.exited) return;
-    this.proc.stdin.write(JSON.stringify(message) + "\n");
+    const payload = this.jsonrpc ? { jsonrpc: "2.0" as const, ...message } : message;
+    this.proc.stdin.write(JSON.stringify(payload) + "\n");
     void this.proc.stdin.flush();
   }
 
@@ -127,7 +139,7 @@ export class RpcProcess {
   }
 }
 
-async function* lines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+export async function* lines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder();
   let buffer = "";
   for await (const chunk of stream) {

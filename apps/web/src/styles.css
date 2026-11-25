@@ -256,6 +256,41 @@ textarea:focus-visible {
   margin: 0 0 28px;
 }
 
+.agent-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.agent-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.agent-chip:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.agent-chip.selected {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.agent-harness {
+  font-size: 12px;
+  color: var(--faint);
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;

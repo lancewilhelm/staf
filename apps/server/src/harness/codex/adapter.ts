@@ -15,7 +15,8 @@ import type {
   TurnCompletedNotification,
   TurnStartResponse,
 } from "./protocol.ts";
-import { RpcError, RpcProcess } from "./rpc.ts";
+import { basename, describeError as describe, firstLine, hostOf, noteActivity, truncate } from "../activities.ts";
+import { RpcError, RpcProcess } from "../rpc.ts";
 
 export interface CodexOptions {
   /** CODEX_HOME for Staf's own sign-in and configuration. */
@@ -50,7 +51,6 @@ export interface CodexApp {
 /** Where `staf apps` caches the account's apps, so that turns can map names to IDs. */
 const APP_CATALOG = "staf-apps.json";
 const IDLE_MS = 10 * 60 * 1000;
-const MAX_DETAIL = 4000;
 
 export class CodexAdapter implements HarnessAdapter {
   readonly id = "codex";
@@ -324,7 +324,7 @@ export class CodexAdapter implements HarnessAdapter {
       if (!completed) return;
       if (message.phase === "commentary") {
         if (message.text.trim()) {
-          turn.emit({ type: "activity", activity: commentaryActivity(message.id, message.text) });
+          turn.emit({ type: "activity", activity: noteActivity(message.id, message.text) });
         }
       } else if (!turn.streamed.has(message.id) && message.text) {
         // No deltas arrived for this message, so send the whole text now.
@@ -498,42 +498,3 @@ function describeSearch(
   return { kind: "page", title: "Read a page" };
 }
 
-function commentaryActivity(id: string, text: string): Activity {
-  const now = Date.now();
-  const line = firstLine(text);
-  const activity: Activity = {
-    id,
-    kind: "note",
-    title: line,
-    status: "done",
-    startedAt: now,
-    completedAt: now,
-  };
-  if (text.trim() !== line) activity.detail = text.trim();
-  return activity;
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
-function firstLine(text: string): string {
-  const line = text.trim().split("\n")[0] ?? "";
-  return line.length > 120 ? `${line.slice(0, 117)}…` : line;
-}
-
-function basename(path: string): string {
-  return path.split("/").pop() ?? path;
-}
-
-function truncate(text: string): string {
-  return text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}\n…` : text;
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

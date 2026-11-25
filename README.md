@@ -1,10 +1,10 @@
 # Staf
 
-Staf is a personal agent host for a household. It runs existing agent harnesses, starting
-with ChatGPT through Codex, and gives them a simple chat interface in the browser and the
-terminal. Read the [specification](docs/spec.md) for the design and the delivery plan.
+Staf is a personal agent host for a household. It runs existing agent harnesses (ChatGPT
+through Codex, Gemini through Antigravity, and Claude through Claude Code) and gives them
+a simple chat interface in the browser and the terminal. Read the [specification](docs/spec.md) for the design and the delivery plan.
 
-Status: slice 1a. Chat works in the web app and the CLI on Codex.
+Status: slice 1 is done. Chat works in the web app and the CLI on all three harnesses.
 
 ## Documentation
 
@@ -12,12 +12,14 @@ Status: slice 1a. Chat works in the web app and the CLI on Codex.
 - [Running Staf](docs/deployment.md): where files live, backups, and the server plan
 - [Specification](docs/spec.md): the design and the delivery slices
 - [Decisions](docs/decisions.md): what was decided, and why
+- [Memory](docs/memory.md): the planned design for agent memory
 
 ## Requirements
 
 - macOS or Linux
 - [Bun](https://bun.sh) 1.4 or later, to build from source
-- The [Codex CLI](https://github.com/openai/codex) and a ChatGPT account
+- At least one harness: the [Codex CLI](https://github.com/openai/codex) with a ChatGPT
+  account, Antigravity's `agy` command, or [Claude Code](https://claude.com/claude-code)
 
 ## Quick start
 

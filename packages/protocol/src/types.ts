@@ -62,6 +62,15 @@ export interface ThreadDetail {
   messages: Message[];
 }
 
+export interface AgentSummary {
+  id: string;
+  name: string;
+  /** Harness ID, such as "codex". */
+  harness: string;
+  /** Harness name to show, such as "ChatGPT (Codex)". */
+  harnessLabel: string;
+}
+
 export interface HarnessInfo {
   id: string;
   label: string;
@@ -95,6 +104,8 @@ export type StreamEvent =
   | { type: "thread.deleted"; threadId: string }
   | { type: "message.created"; message: Message }
   | { type: "message.delta"; threadId: string; messageId: string; text: string }
+  /** Replaces the whole text of a streaming message. */
+  | { type: "message.text"; threadId: string; messageId: string; text: string }
   | { type: "message.activity"; threadId: string; messageId: string; activity: Activity }
   | { type: "message.completed"; message: Message };
 

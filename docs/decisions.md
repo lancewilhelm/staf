@@ -3,6 +3,49 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Antigravity and Claude use the person's own sign-in
+
+Codex has a separate Staf sign-in. Antigravity and Claude use the sign-in that already
+exists on the machine, and Staf keeps the person's own setup out in another way:
+
+- Antigravity runs with `--gemini-dir ~/.staf/harness/antigravity`. Its sign-in comes
+  from the system keychain, so a separate data folder needs no new login, and the
+  person's global GEMINI.md, hooks, and skills do not load.
+- Claude runs with `--safe-mode`, which leaves out the person's CLAUDE.md, skills,
+  plugins, hooks, and MCP servers while the sign-in keeps working.
+
+Why: both keep a person's own setup out of Staf runs without a second login, and neither
+copies a credentials file. The cost is that Claude's transcripts live in `~/.claude`,
+outside Staf's data folder. Check `--safe-mode` again when Staf adds its own MCP server,
+because safe mode also turns off MCP servers.
+
+## 2026-11-25: Text before a tool call is commentary
+
+Claude and Antigravity stream plain text with no label for commentary. Staf streams text
+into the answer at once, and when a tool call follows, it moves that text into a step
+and starts the answer again. Codex labels commentary itself.
+
+Why: the answer should hold the answer, as it does with Codex, while text still appears
+as soon as it streams.
+
+## 2026-11-25: Staf answers ACP permission requests itself
+
+ACP agents ask the client before they run commands or change files. Staf allows reads,
+searches, and sandboxed commands, allows file changes only inside the workspace (and,
+where the harness supports it, the writable folders), and always refuses Antigravity's
+requests to run a command outside its sandbox.
+
+Why: when a command fails in the sandbox, the model asks to rerun it outside. Allowing
+that would undo the sandbox. On Antigravity, commands therefore never reach the network.
+
+## 2026-11-25: Claude runs one process per turn
+
+Each Claude turn starts `claude -p` with `--resume`, and the process exits when the turn
+ends.
+
+Why: it is the simplest way to drive Claude Code, it holds no memory between turns, and
+stopping an answer is a signal to one process. Startup adds about a second per turn.
+
 ## 2026-11-24: Agents write only to their workspace
 
 An agent's `agent.json` and `AGENTS.md` live outside its `workspace/` folder, and Staf

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
@@ -92,6 +92,24 @@ export class Agents {
     const instructionsPath = join(dir, "AGENTS.md");
     if (!existsSync(instructionsPath)) writeFileSync(instructionsPath, DEFAULT_INSTRUCTIONS);
     return this.get(DEFAULT_AGENT_ID)!;
+  }
+
+  /** Lists every agent folder, with the agents whose settings have a problem left out. */
+  list(): Agent[] {
+    if (!existsSync(this.root)) return [];
+    const agents: Agent[] = [];
+    for (const entry of readdirSync(this.root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const agent = this.get(entry.name);
+        if (agent) agents.push(agent);
+      } catch (error) {
+        if (!(error instanceof AgentConfigError)) throw error;
+      }
+    }
+    return agents.sort((a, b) =>
+      a.id === DEFAULT_AGENT_ID ? -1 : b.id === DEFAULT_AGENT_ID ? 1 : a.name.localeCompare(b.name),
+    );
   }
 
   /**

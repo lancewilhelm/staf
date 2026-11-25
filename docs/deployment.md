@@ -15,17 +15,26 @@ different folder, for example on a server's data disk.
 | `agents/<id>/AGENTS.md` | An agent's instructions | You |
 | `agents/<id>/workspace/` | Files that the agent creates: notes, scripts, skills, reports | The agent |
 | `harness/codex/` | Staf's own Codex sign-in, Codex's session logs, and the cached list of apps | Codex and Staf |
+| `harness/antigravity/` | Antigravity's settings and conversations for Staf runs | Antigravity |
 
-Codex also writes its own transcript of each conversation under
-`harness/codex/sessions/`. Treat that folder as private, like `staf.db`.
+The harnesses keep their own transcript of each conversation. Treat these folders as
+private, like `staf.db`:
 
-Nothing outside `STAF_HOME` is written, except folders that you list in an agent's
-`writableFolders` and the temporary folder that the harness sandbox allows.
+- Codex: `harness/codex/sessions/`
+- Antigravity: `harness/antigravity/`
+- Claude: **outside `STAF_HOME`**, in `~/.claude/projects/`, in a folder named after the
+  agent's workspace path. Claude runs use your own Claude Code sign-in, which lives with
+  your Claude Code settings.
+
+Apart from Claude's transcripts, nothing outside `STAF_HOME` is written, except folders
+that you list in an agent's `writableFolders` and the temporary folder that the harness
+sandboxes allow.
 
 ### Backups
 
 Stop Staf, then copy the whole `STAF_HOME` folder. That captures conversations, agents
-and their workspaces, and the harness sign-ins. To restore, copy it back before
+and their workspaces, and Staf's Codex sign-in. Antigravity and Claude sign in again on
+a new machine. To restore, copy it back before
 starting Staf.
 
 ## Running on your Mac today
@@ -42,7 +51,9 @@ and it has no sign-in yet. It stops when you close the terminal.
 
 The harnesses run on the same machine as Staf, because Staf starts them as child
 processes. That machine therefore needs Staf, the harness command-line tools (`codex`,
-and later `agy` and `claude`), and each harness's sign-in.
+`agy`, and `claude`), and each harness's sign-in. On macOS, Antigravity and Claude keep
+their sign-ins in the system keychain; how they sign in on a headless Linux server needs
+testing.
 
 ### Mac (a Mac mini, or your Mac)
 

@@ -1,5 +1,6 @@
 import type { HealthInfo, StreamEvent } from "@staf/protocol";
 import type { HTMLBundle, Server } from "bun";
+import type { Agents } from "./agents.ts";
 import type { EventBus } from "./bus.ts";
 import { ChatError, type ChatService } from "./chat.ts";
 import { VERSION } from "./config.ts";
@@ -9,6 +10,7 @@ export interface HttpOptions {
   hostname: string;
   port: number;
   chat: ChatService;
+  agents: Agents;
   bus: EventBus;
   harnesses: Map<string, HarnessAdapter>;
   /** The web app. Tests can leave it out. */
@@ -45,6 +47,18 @@ export function startHttp(options: HttpOptions): Server<undefined> {
         const body: HealthInfo = { version: VERSION, harnesses };
         return json(body);
       }),
+    },
+    "/api/agents": {
+      GET: api(() =>
+        json(
+          options.agents.list().map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            harness: agent.harness,
+            harnessLabel: options.harnesses.get(agent.harness)?.label ?? agent.harness,
+          })),
+        ),
+      ),
     },
     "/api/threads": {
       GET: api(() => json(chat.listThreads())),

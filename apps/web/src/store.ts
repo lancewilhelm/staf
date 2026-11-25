@@ -1,5 +1,6 @@
 import {
   type Activity,
+  type AgentSummary,
   type HealthInfo,
   type Message,
   StafClient,
@@ -17,6 +18,9 @@ export interface State {
   /** Messages for each thread that has been opened. */
   messages: Record<string, Message[]>;
   health: HealthInfo | null;
+  agents: AgentSummary[];
+  /** The agent that a new chat goes to. */
+  agentId: string;
   connection: Connection;
   /** The last error from an action, shown once to the person. */
   error: string | null;
@@ -29,6 +33,8 @@ let state: State = {
   threads: [],
   messages: {},
   health: null,
+  agents: [],
+  agentId: readSavedAgent(),
   connection: "connecting",
   error: null,
 };
@@ -48,6 +54,23 @@ export function useStore<T>(select: (state: State) => T): T {
     },
     () => select(state),
   );
+}
+
+function readSavedAgent(): string {
+  try {
+    return localStorage.getItem("staf.agent") ?? "default";
+  } catch {
+    return "default";
+  }
+}
+
+export function chooseAgent(agentId: string): void {
+  set({ agentId });
+  try {
+    localStorage.setItem("staf.agent", agentId);
+  } catch {
+    // The choice still applies until the page reloads.
+  }
 }
 
 function threadFromPath(path: string): string | null {
@@ -101,13 +124,21 @@ async function loadHealth(): Promise<void> {
   set({ health: await api.health() });
 }
 
+async function loadAgents(): Promise<void> {
+  const agents = await api.listAgents();
+  set((current) => ({
+    agents,
+    agentId: agents.some((agent) => agent.id === current.agentId) ? current.agentId : (agents[0]?.id ?? "default"),
+  }));
+}
+
 // Actions
 
 export async function sendMessage(text: string): Promise<void> {
   try {
     let id = state.threadId;
     if (!id) {
-      const thread = await api.createThread();
+      const thread = await api.createThread({ agentId: state.agentId });
       id = thread.id;
       set((current) => ({
         messages: { ...current.messages, [thread.id]: current.messages[thread.id] ?? [] },
@@ -174,6 +205,7 @@ function apply(event: StreamEvent): void {
       set({ connection: "open" });
       void loadThreads().catch(report);
       void loadHealth().catch(() => {});
+      void loadAgents().catch(() => {});
       if (state.threadId) void loadThread(state.threadId);
       return;
     case "thread.upserted":
@@ -212,6 +244,14 @@ function apply(event: StreamEvent): void {
         messages: updateMessage(current.messages, event.threadId, event.messageId, (message) => ({
           ...message,
           text: message.text + event.text,
+        })),
+      }));
+      return;
+    case "message.text":
+      set((current) => ({
+        messages: updateMessage(current.messages, event.threadId, event.messageId, (message) => ({
+          ...message,
+          text: event.text,
         })),
       }));
       return;

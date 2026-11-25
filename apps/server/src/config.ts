@@ -12,6 +12,8 @@ export interface Paths {
   agents: string;
   /** CODEX_HOME for Staf's own Codex sign-in and configuration. */
   codexHome: string;
+  /** Staf's own Antigravity data folder (agy's --gemini-dir). */
+  antigravityHome: string;
 }
 
 export function resolvePaths(env: Record<string, string | undefined> = process.env): Paths {
@@ -21,6 +23,7 @@ export function resolvePaths(env: Record<string, string | undefined> = process.e
     db: join(home, "staf.db"),
     agents: join(home, "agents"),
     codexHome: join(home, "harness", "codex"),
+    antigravityHome: join(home, "harness", "antigravity"),
   };
 }
 
