@@ -72,6 +72,8 @@ export function startHttp(options: HttpOptions): Server<undefined> {
           name: edit.name,
           harness: edit.harness,
           model: edit.model ?? null,
+          effort: edit.effort ?? null,
+          fast: edit.fast ?? false,
           instructions: edit.instructions ?? "",
         });
         bus.publish({ type: "agents.changed" });
@@ -125,18 +127,13 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       POST: api(async (req) => {
         const body = await readJson(req);
         const agentId = typeof body.agentId === "string" ? body.agentId : undefined;
-        const harness = typeof body.harness === "string" ? body.harness : undefined;
-        const model = readModel(body.model);
-        return json(chat.createThread(agentId, { harness, ...(model !== undefined ? { model } : {}) }), 201);
+        return json(chat.createThread(agentId, readChoice(body)), 201);
       }),
     },
     "/api/threads/:id": {
       GET: api((req) => json(chat.getThread(req.params.id!))),
       PATCH: api(async (req) => {
-        const body = await readJson(req);
-        const harness = typeof body.harness === "string" ? body.harness : undefined;
-        const model = readModel(body.model);
-        return json(chat.updateThread(req.params.id!, { harness, ...(model !== undefined ? { model } : {}) }));
+        return json(chat.updateThread(req.params.id!, readChoice(await readJson(req))));
       }),
       DELETE: api(async (req) => {
         await chat.deleteThread(req.params.id!);
@@ -170,6 +167,8 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       harness: agent.harness,
       harnessLabel: options.harnesses.get(agent.harness)?.label ?? agent.harness,
       model: agent.model,
+      effort: agent.effort,
+      fast: agent.fast,
       instructions: agent.instructions,
       network: agent.access.network,
       writableFolders: agent.access.writableFolders,
@@ -191,6 +190,10 @@ export function startHttp(options: HttpOptions): Server<undefined> {
     }
     const model = readModel(body.model);
     if (model !== undefined) edit.model = model;
+    const effort = readEffort(body.effort);
+    if (effort !== undefined) edit.effort = effort;
+    const fast = readFast(body.fast);
+    if (fast !== undefined) edit.fast = fast;
     if (body.instructions !== undefined) {
       if (typeof body.instructions !== "string") throw new ChatError(400, "The instructions must be text.");
       edit.instructions = body.instructions;
@@ -264,6 +267,41 @@ function eventStream(req: Request, server: Server<undefined>, bus: EventBus): Re
       connection: "keep-alive",
     },
   });
+}
+
+/** Reads the harness, model, reasoning level, and fast mode that a conversation asks for. */
+function readChoice(body: Record<string, unknown>): {
+  harness?: string;
+  model?: string | null;
+  effort?: string | null;
+  fast?: boolean;
+} {
+  if (body.harness !== undefined && typeof body.harness !== "string") {
+    throw new ChatError(400, "The harness must be text.");
+  }
+  const choice: { harness?: string; model?: string | null; effort?: string | null; fast?: boolean } = {};
+  if (typeof body.harness === "string") choice.harness = body.harness;
+  const model = readModel(body.model);
+  if (model !== undefined) choice.model = model;
+  const effort = readEffort(body.effort);
+  if (effort !== undefined) choice.effort = effort;
+  const fast = readFast(body.fast);
+  if (fast !== undefined) choice.fast = fast;
+  return choice;
+}
+
+/** Reads an optional reasoning level, such as "high", or null for the model's default. */
+function readEffort(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string" && /^[a-z]{1,16}$/.test(value)) return value;
+  throw new ChatError(400, 'The reasoning level must be a word such as "high", or null.');
+}
+
+function readFast(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "boolean") return value;
+  throw new ChatError(400, "Fast mode must be true or false.");
 }
 
 /** Reads an optional model field: a model ID, null for the harness's default, or undefined. */

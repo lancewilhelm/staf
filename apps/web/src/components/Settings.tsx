@@ -2,14 +2,18 @@ import type { AgentSummary, HarnessInfo } from "@staf/protocol";
 import { useEffect, useRef, useState } from "react";
 import {
   closeSettings,
+  effortName,
   loadModels,
+  modelInfo,
   openSettings,
   removeAgent,
   saveAgent,
   type SettingsView,
   signIn,
+  useHarnesses,
   useStore,
 } from "../store.ts";
+import { FastSwitch } from "./ChatPill.tsx";
 import { Icon } from "./Icon.tsx";
 
 /** The settings window: agents and providers. */
@@ -105,13 +109,15 @@ function AgentForm({
   onSaved: (agent: AgentSummary) => void;
   onDeleted: () => void;
 }) {
-  const harnesses = useStore((s) => s.health?.harnesses ?? []);
+  const harnesses = useHarnesses();
   const models = useStore((s) => s.models);
   const threadCount = useStore((s) => (agent ? s.threads.filter((t) => t.agentId === agent.id).length : 0));
 
   const [name, setName] = useState(agent?.name ?? "");
   const [harness, setHarness] = useState(agent?.harness ?? "codex");
   const [model, setModel] = useState<string | null>(agent?.model ?? null);
+  const [effort, setEffort] = useState<string | null>(agent?.effort ?? null);
+  const [fast, setFast] = useState(agent?.fast ?? false);
   const [instructions, setInstructions] = useState(agent?.instructions ?? "");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -122,16 +128,19 @@ function AgentForm({
 
   const info = harnesses.find((h) => h.id === harness);
   const list = models[harness];
+  const chosen = modelInfo(models, harness, model);
   const changed =
     !agent ||
     name !== agent.name ||
     harness !== agent.harness ||
     model !== agent.model ||
+    effort !== agent.effort ||
+    fast !== agent.fast ||
     instructions !== agent.instructions;
 
   const save = async () => {
     setBusy(true);
-    const result = await saveAgent(agent?.id ?? null, { name, harness, model, instructions });
+    const result = await saveAgent(agent?.id ?? null, { name, harness, model, effort, fast, instructions });
     setBusy(false);
     if (result) {
       setSaved(true);
@@ -173,6 +182,8 @@ function AgentForm({
             onChange={(e) => {
               setHarness(e.target.value);
               setModel(null);
+              setEffort(null);
+              setFast(false);
             }}
           >
             {harnesses.map((h) => (
@@ -185,7 +196,16 @@ function AgentForm({
         </label>
         <label className="field">
           <span>Default model</span>
-          <select value={model ?? ""} onChange={(e) => setModel(e.target.value || null)}>
+          <select
+            value={model ?? ""}
+            onChange={(e) => {
+              const next = e.target.value || null;
+              const nextInfo = modelInfo(models, harness, next);
+              setModel(next);
+              if (effort && !nextInfo?.efforts?.includes(effort)) setEffort(null);
+              if (fast && !nextInfo?.fast) setFast(false);
+            }}
+          >
             <option value="">Provider's default</option>
             {list?.status === "ready" &&
               list.list.map((m) => (
@@ -197,6 +217,31 @@ function AgentForm({
           </select>
         </label>
       </div>
+      {(chosen?.efforts || chosen?.fast) && (
+        <div className="field-row">
+          {chosen.efforts && (
+            <label className="field">
+              <span>Default reasoning</span>
+              <select value={effort ?? ""} onChange={(e) => setEffort(e.target.value || null)}>
+                <option value="">
+                  Model's default{chosen.defaultEffort ? ` (${effortName(chosen.defaultEffort)})` : ""}
+                </option>
+                {chosen.efforts.map((level) => (
+                  <option key={level} value={level}>
+                    {effortName(level)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {chosen.fast && (
+            <div className="field">
+              <span>Speed</span>
+              <FastSwitch info={chosen} value={fast} onChange={setFast} />
+            </div>
+          )}
+        </div>
+      )}
       {info?.note && <p className="field-note">{info.note}</p>}
       {list?.status === "error" && <p className="field-note error">{list.error}</p>}
 
@@ -253,7 +298,7 @@ function AccessSummary({ agent }: { agent: AgentSummary }) {
 // Providers
 
 function ProvidersPane() {
-  const harnesses = useStore((s) => s.health?.harnesses ?? []);
+  const harnesses = useHarnesses();
   return (
     <div className="providers-pane">
       {harnesses.map((h) => (

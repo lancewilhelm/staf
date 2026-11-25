@@ -16,6 +16,7 @@ import {
   truncate,
 } from "../activities.ts";
 import { RpcError, RpcProcess } from "../rpc.ts";
+import { groupLevels, resolveLevel } from "./levels.ts";
 import type { HarnessAdapter, TurnOutcome, TurnRequest } from "../types.ts";
 
 /** The parts of an ACP tool call that Staf reads. Updates may carry only some fields. */
@@ -118,7 +119,13 @@ export class AcpAdapter implements HarnessAdapter {
     return base;
   }
 
+  /** Lists the models, with the reasoning levels of each model merged into one entry. */
   async listModels(): Promise<ModelInfo[]> {
+    return groupLevels(await this.rawModels());
+  }
+
+  /** The harness's own model list, in which each reasoning level is a separate model. */
+  private async rawModels(): Promise<ModelInfo[]> {
     this.models ??= this.readModelCache();
     if (this.models) return this.models.list;
     // The model list only comes with a session, so open one in an empty folder and delete it.
@@ -292,9 +299,11 @@ export class AcpAdapter implements HarnessAdapter {
     }
   }
 
-  /** Switches the session to the requested model, or back to the default, when it differs. */
+  /** Switches the session to the requested model and level, or back to the default, when it differs. */
   private async applyModel(rpc: RpcProcess, sessionId: string, request: TurnRequest): Promise<void> {
-    const wanted = request.model ?? this.models?.defaultId ?? null;
+    const wanted = this.models
+      ? resolveLevel(this.models.list, request.model, request.effort)
+      : (request.model ?? null);
     if (!wanted || this.sessionModels.get(sessionId) === wanted) return;
     try {
       await rpc.request("session/set_model", { sessionId, modelId: wanted });

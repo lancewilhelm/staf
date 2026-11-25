@@ -8,7 +8,7 @@ import type {
   ThreadSummary,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 interface ThreadRow {
   id: string;
@@ -16,6 +16,8 @@ interface ThreadRow {
   agent_id: string;
   harness: string;
   model: string | null;
+  effort: string | null;
+  fast: number;
   session_id: string | null;
   status: ThreadStatus;
   created_at: number;
@@ -77,6 +79,15 @@ export class Store {
     if (version >= SCHEMA_VERSION) return;
     if (version < 1) this.createV1();
     if (version < 2) this.migrateToV2();
+    if (version < 3) this.migrateToV3();
+  }
+
+  private migrateToV3(): void {
+    this.db.transaction(() => {
+      this.db.run("ALTER TABLE threads ADD COLUMN effort TEXT");
+      this.db.run("ALTER TABLE threads ADD COLUMN fast INTEGER NOT NULL DEFAULT 0");
+      this.db.run("PRAGMA user_version = 3");
+    })();
   }
 
   private migrateToV2(): void {
@@ -150,7 +161,14 @@ export class Store {
     return changed.changes;
   }
 
-  createThread(input: { title: string; agentId: string; harness: string; model: string | null }): StoredThread {
+  createThread(input: {
+    title: string;
+    agentId: string;
+    harness: string;
+    model: string | null;
+    effort: string | null;
+    fast: boolean;
+  }): StoredThread {
     const now = Date.now();
     const thread: StoredThread = {
       id: crypto.randomUUID(),
@@ -158,6 +176,8 @@ export class Store {
       agentId: input.agentId,
       harness: input.harness,
       model: input.model,
+      effort: input.effort,
+      fast: input.fast,
       sessionId: null,
       status: "idle",
       createdAt: now,
@@ -165,8 +185,8 @@ export class Store {
     };
     this.db
       .query(
-        `INSERT INTO threads (id, title, agent_id, harness, model, session_id, status, created_at, updated_at)
-         VALUES ($id, $title, $agentId, $harness, $model, NULL, $status, $createdAt, $updatedAt)`,
+        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, session_id, status, created_at, updated_at)
+         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, NULL, $status, $createdAt, $updatedAt)`,
       )
       .run({
         id: thread.id,
@@ -174,6 +194,8 @@ export class Store {
         agentId: thread.agentId,
         harness: thread.harness,
         model: thread.model,
+        effort: thread.effort,
+        fast: thread.fast ? 1 : 0,
         status: thread.status,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
@@ -201,6 +223,8 @@ export class Store {
       title?: string;
       harness?: string;
       model?: string | null;
+      effort?: string | null;
+      fast?: boolean;
       sessionId?: string | null;
       status?: ThreadStatus;
       touch?: boolean;
@@ -213,20 +237,24 @@ export class Store {
       title: patch.title ?? current.title,
       harness: patch.harness ?? current.harness,
       model: patch.model === undefined ? current.model : patch.model,
+      effort: patch.effort === undefined ? current.effort : patch.effort,
+      fast: patch.fast ?? current.fast,
       sessionId: patch.sessionId === undefined ? current.sessionId : patch.sessionId,
       status: patch.status ?? current.status,
       updatedAt: patch.touch ? Date.now() : current.updatedAt,
     };
     this.db
       .query(
-        `UPDATE threads SET title = $title, harness = $harness, model = $model, session_id = $sessionId,
-           status = $status, updated_at = $updatedAt WHERE id = $id`,
+        `UPDATE threads SET title = $title, harness = $harness, model = $model, effort = $effort, fast = $fast,
+           session_id = $sessionId, status = $status, updated_at = $updatedAt WHERE id = $id`,
       )
       .run({
         id,
         title: next.title,
         harness: next.harness,
         model: next.model,
+        effort: next.effort,
+        fast: next.fast ? 1 : 0,
         sessionId: next.sessionId,
         status: next.status,
         updatedAt: next.updatedAt,
@@ -352,6 +380,8 @@ function toThread(row: ThreadRow): StoredThread {
     agentId: row.agent_id,
     harness: row.harness,
     model: row.model,
+    effort: row.effort,
+    fast: row.fast === 1,
     sessionId: row.session_id,
     status: row.status,
     createdAt: row.created_at,

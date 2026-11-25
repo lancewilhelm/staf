@@ -54,6 +54,32 @@ export interface CodexApp {
 const APP_CATALOG = "staf-apps.json";
 const IDLE_MS = 10 * 60 * 1000;
 const MODELS_TTL_MS = 10 * 60 * 1000;
+/** Codex's service tier for fast mode, which ChatGPT names "Fast". */
+const FAST_TIER = "priority";
+
+/** The fields of a `model/list` entry that Staf uses. */
+interface CodexModel {
+  id: string;
+  displayName: string;
+  hidden: boolean;
+  isDefault: boolean;
+  supportedReasoningEfforts?: Array<{ reasoningEffort: string }>;
+  defaultReasoningEffort?: string | null;
+  serviceTiers?: Array<{ id: string; name: string; description?: string }>;
+}
+
+function toModelInfo(model: CodexModel): ModelInfo {
+  const efforts = (model.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort);
+  const fast = model.serviceTiers?.find((tier) => tier.id === FAST_TIER);
+  return {
+    id: model.id,
+    name: model.displayName,
+    ...(model.isDefault ? { isDefault: true } : {}),
+    ...(efforts.length > 1 ? { efforts } : {}),
+    ...(efforts.length > 1 && model.defaultReasoningEffort ? { defaultEffort: model.defaultReasoningEffort } : {}),
+    ...(fast ? { fast: true, ...(fast.description ? { fastNote: fast.description } : {}) } : {}),
+  };
+}
 
 export const CODEX_NOTE = "Uses Staf's own ChatGPT sign-in. Account apps such as Gmail stay off unless an agent allows them.";
 
@@ -99,25 +125,15 @@ export class CodexAdapter implements HarnessAdapter {
     const list: ModelInfo[] = [];
     let cursor: string | null = null;
     do {
-      const page: { data: Array<{ id: string; displayName: string; hidden: boolean; isDefault: boolean }>; nextCursor: string | null } =
-        await rpc.request("model/list", { cursor, limit: 100 });
+      const page: { data: CodexModel[]; nextCursor: string | null } = await rpc.request("model/list", { cursor, limit: 100 });
       for (const model of page.data) {
-        if (model.hidden) continue;
-        list.push({ id: model.id, name: model.displayName, ...(model.isDefault ? { isDefault: true } : {}) });
+        if (!model.hidden) list.push(toModelInfo(model));
       }
       cursor = page.nextCursor;
     } while (cursor);
     this.models = { list, at: Date.now() };
     this.startIdleTimerIfIdle();
     return list;
-  }
-
-  private async defaultModel(): Promise<string | null> {
-    try {
-      return (await this.listModels()).find((model) => model.isDefault)?.id ?? null;
-    } catch {
-      return null;
-    }
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -251,13 +267,19 @@ export class CodexAdapter implements HarnessAdapter {
 
     const turn = this.turns.get(threadId)!;
     try {
-      // The model applies to this turn and later ones, so a change takes effect at once. A
-      // thread that asks for the default gets it named, in case it used another model before.
-      const model = request.model ?? (await this.defaultModel());
+      // The model, level, and tier apply to this turn and later ones, so a change takes
+      // effect at once. Defaults are named, in case the thread used something else before.
+      const models = await this.listModels().catch(() => [] as ModelInfo[]);
+      const info = request.model ? models.find((m) => m.id === request.model) : models.find((m) => m.isDefault);
+      const model = request.model ?? info?.id ?? null;
+      const effort =
+        request.effort && info?.efforts?.includes(request.effort) ? request.effort : (info?.defaultEffort ?? null);
       const started = await rpc.request<TurnStartResponse>("turn/start", {
         threadId,
         input: [{ type: "text", text: input, text_elements: [] }],
         ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
+        serviceTier: request.fast && info?.fast ? FAST_TIER : null,
       });
       turn.turnId = started.turn.id;
       if (request.signal.aborted) {

@@ -1,7 +1,7 @@
 // Claude through Claude Code's print mode with stream-JSON output, one process per turn.
 
 import { existsSync, readdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
@@ -26,14 +26,57 @@ export interface ClaudeOptions {
 export const CLAUDE_NOTE =
   "Uses this computer's Claude Code sign-in, and Claude Code keeps its own copy of each conversation in ~/.claude.";
 
-/** Claude Code accepts these aliases and maps them to the newest model of each family. */
+/**
+ * Used when Claude Code cannot list its models. It accepts these aliases and maps them to
+ * the newest model of each family.
+ */
 export const CLAUDE_MODELS: ModelInfo[] = [
-  { id: "opus", name: "Claude Opus" },
-  { id: "sonnet", name: "Claude Sonnet" },
-  { id: "haiku", name: "Claude Haiku" },
+  { id: "opus", name: "Opus", isDefault: true },
+  { id: "sonnet", name: "Sonnet" },
+  { id: "haiku", name: "Haiku" },
 ];
 
+const CLAUDE_FAST_NOTE = "Faster answers, billed to usage credits on top of the Claude plan";
+
 const SIGN_IN_TTL_MS = 60_000;
+const MODELS_TTL_MS = 10 * 60 * 1000;
+const PROBE_TIMEOUT_MS = 20_000;
+
+/** One entry of the model list in Claude Code's `initialize` response. */
+interface ClaudeModel {
+  value: string;
+  resolvedModel?: string;
+  displayName: string;
+  supportsEffort?: boolean;
+  supportedEffortLevels?: string[];
+  supportsFastMode?: boolean;
+}
+
+/**
+ * Turns Claude Code's model list into Staf's. The "default" entry is left out, and the first
+ * alias that resolves to the same model is marked as the default instead. Fast mode is left
+ * out when Claude Code says that the account cannot use it.
+ */
+export function claudeModels(models: ClaudeModel[], fastAvailable: boolean): ModelInfo[] {
+  const fallback = models.find((model) => model.value === "default")?.resolvedModel;
+  let defaultMarked = false;
+  const list: ModelInfo[] = [];
+  for (const model of models) {
+    if (model.value === "default") continue;
+    const isDefault = !defaultMarked && fallback !== undefined && model.resolvedModel === fallback;
+    if (isDefault) defaultMarked = true;
+    const efforts = model.supportsEffort ? (model.supportedEffortLevels ?? []) : [];
+    const fast = fastAvailable && model.supportsFastMode === true;
+    list.push({
+      id: model.value,
+      name: model.displayName,
+      ...(isDefault ? { isDefault: true } : {}),
+      ...(efforts.length > 1 ? { efforts } : {}),
+      ...(fast ? { fast: true, fastNote: CLAUDE_FAST_NOTE } : {}),
+    });
+  }
+  return list;
+}
 
 /**
  * Built-in tools that Staf allows. Others are left out: cloud features of the Claude
@@ -46,7 +89,9 @@ export const CLAUDE_TOOLS = ["Bash", "Read", "Edit", "Write", "WebSearch", "WebF
 const PREAPPROVED = ["Bash", "WebSearch", "WebFetch"];
 
 /** Builds the command-line arguments for one turn. */
-export function claudeArgs(request: Pick<TurnRequest, "sessionId" | "instructions" | "model" | "access">): string[] {
+export function claudeArgs(
+  request: Pick<TurnRequest, "sessionId" | "instructions" | "model" | "effort" | "fast" | "access">,
+): string[] {
   return [
     "-p",
     "--output-format",
@@ -64,10 +109,11 @@ export function claudeArgs(request: Pick<TurnRequest, "sessionId" | "instruction
     "--allowedTools",
     ...PREAPPROVED,
     "--settings",
-    JSON.stringify(claudeSettings(request.access)),
+    JSON.stringify(claudeSettings(request.access, request.fast)),
     "--append-system-prompt",
     request.instructions,
     ...(request.model ? ["--model", request.model] : []),
+    ...(request.effort ? ["--effort", request.effort] : []),
     ...(request.sessionId ? ["--resume", request.sessionId] : []),
     ...request.access.writableFolders.flatMap((folder) => ["--add-dir", folder]),
   ];
@@ -75,10 +121,12 @@ export function claudeArgs(request: Pick<TurnRequest, "sessionId" | "instruction
 
 /**
  * Commands run in Claude Code's sandbox and may not leave it. Network access is open to
- * every domain when the agent allows it, and closed otherwise.
+ * every domain when the agent allows it, and closed otherwise. Fast mode is set either way,
+ * so that the person's own Claude Code setting does not apply.
  */
-export function claudeSettings(access: AgentAccess): Record<string, unknown> {
+export function claudeSettings(access: AgentAccess, fast = false): Record<string, unknown> {
   return {
+    fastMode: fast,
     sandbox: {
       enabled: true,
       autoAllowBashIfSandboxed: true,
@@ -97,6 +145,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude";
   readonly label = "Claude";
   private signIn: { signedIn: boolean | undefined; at: number } | null = null;
+  private models: { list: ModelInfo[]; at: number } | null = null;
 
   constructor(private readonly options: ClaudeOptions = {}) {}
 
@@ -119,8 +168,77 @@ export class ClaudeAdapter implements HarnessAdapter {
     return { ...base, ...(signedIn !== undefined ? { signedIn } : {}) };
   }
 
+  /** Asks Claude Code for its models, at most every ten minutes, and falls back to the aliases. */
   async listModels(): Promise<ModelInfo[]> {
-    return CLAUDE_MODELS;
+    if (this.models && Date.now() - this.models.at < MODELS_TTL_MS) return this.models.list;
+    let list = CLAUDE_MODELS;
+    try {
+      const probed = await this.probeModels();
+      if (probed.length > 0) list = probed;
+    } catch (error) {
+      console.warn(`Claude Code did not list its models, so Staf uses the aliases: ${describeError(error)}`);
+    }
+    this.models = { list, at: Date.now() };
+    return list;
+  }
+
+  /**
+   * Starts Claude Code in stream-JSON mode and sends only the `initialize` request, which
+   * returns the model list without sending a message. Fast mode is asked for, so that the
+   * response says whether this account can use it.
+   */
+  private async probeModels(): Promise<ModelInfo[]> {
+    const command = this.options.command ?? ["claude"];
+    const proc = Bun.spawn(
+      [
+        ...command,
+        "-p",
+        "--safe-mode",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--settings",
+        JSON.stringify({ fastMode: true }),
+      ],
+      { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "ignore" },
+    );
+    const timer = setTimeout(() => proc.kill(), PROBE_TIMEOUT_MS);
+    try {
+      proc.stdin.write(JSON.stringify({ type: "control_request", request_id: "staf-models", request: { subtype: "initialize" } }) + "\n");
+      await proc.stdin.flush();
+      for await (const line of lines(proc.stdout)) {
+        let message: { type?: string; response?: { request_id?: string; response?: Record<string, unknown> } };
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (message.type !== "control_response" || message.response?.request_id !== "staf-models") continue;
+        const body = message.response.response ?? {};
+        const models = Array.isArray(body.models) ? (body.models as ClaudeModel[]) : [];
+        return claudeModels(models, body.fast_mode_disabled_reason == null);
+      }
+      throw new Error("Claude Code closed without an answer.");
+    } finally {
+      clearTimeout(timer);
+      proc.kill();
+    }
+  }
+
+  /** Drops a reasoning level or fast mode that the model does not offer. */
+  private async checkChoice(request: TurnRequest): Promise<TurnRequest> {
+    if (!request.effort && !request.fast) return request;
+    const models = await this.listModels();
+    const info = request.model ? models.find((m) => m.id === request.model) : models.find((m) => m.isDefault);
+    // A model that the list does not know, such as a full model ID, gets what was asked for.
+    if (!info) return request;
+    return {
+      ...request,
+      effort: request.effort && info.efforts?.includes(request.effort) ? request.effort : null,
+      fast: request.fast && info.fast === true,
+    };
   }
 
   /** Deletes Claude Code's transcript of a session and the small files that it keeps beside it. */
@@ -166,6 +284,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     const ready = await this.status();
     if (!ready.ready) return { status: "failed", error: ready.detail ?? "Claude is not ready." };
     try {
+      request = await this.checkChoice(request);
       const first = await this.runOnce(request, request.sessionId);
       if (first.missingSession && request.sessionId) {
         // The saved session is gone. Continue in a new one.

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, ClaudeAdapter, claudeSettings, CLAUDE_TOOLS } from "../src/harness/claude/adapter.ts";
+import { claudeArgs, claudeModels, ClaudeAdapter, claudeSettings, CLAUDE_TOOLS } from "../src/harness/claude/adapter.ts";
 import type { HarnessEvent, TurnRequest } from "../src/harness/types.ts";
 
 const fixture = join(import.meta.dir, "fixtures", "fake-claude.ts");
@@ -35,6 +35,8 @@ function turn(cwd: string, overrides: Partial<TurnRequest> = {}) {
     access: { network: true, harnessApps: [], writableFolders: [] },
     instructions: "Be brief.",
     model: null,
+    effort: null,
+    fast: false,
     input: "What day is it?",
     signal: controller.signal,
     emit: (event) => events.push(event),
@@ -117,6 +119,8 @@ describe("claudeArgs", () => {
       sessionId: null,
       instructions: "Be brief.",
       model: "claude-sonnet-5-5",
+      effort: null,
+      fast: false,
       access: { network: false, harnessApps: [], writableFolders: ["/srv/notes"] },
     });
     expect(args).toContain("--safe-mode");
@@ -132,8 +136,43 @@ describe("claudeArgs", () => {
   test("opens the sandbox network only when the agent allows it", () => {
     const closed = claudeSettings({ network: false, harnessApps: [], writableFolders: [] });
     const open = claudeSettings({ network: true, harnessApps: [], writableFolders: [] });
-    expect(closed).toEqual({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false } });
+    expect(closed).toEqual({
+      fastMode: false,
+      sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
+    });
     expect(open.sandbox).toMatchObject({ network: { allowedDomains: ["*"] } });
+  });
+
+  test("passes the reasoning level and fast mode", () => {
+    const access = { network: true, harnessApps: [], writableFolders: [] };
+    const args = claudeArgs({ sessionId: null, instructions: "", model: "opus", effort: "high", fast: true, access });
+    expect(args[args.indexOf("--effort") + 1]).toBe("high");
+    expect(JSON.parse(args[args.indexOf("--settings") + 1]!).fastMode).toBe(true);
+    expect(claudeArgs({ sessionId: null, instructions: "", model: null, effort: null, fast: false, access })).not.toContain("--effort");
+  });
+
+  test("turns Claude Code's model list into Staf's", () => {
+    const models = claudeModels(
+      [
+        { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", supportsFastMode: true },
+        {
+          value: "opus",
+          resolvedModel: "claude-opus-5-5",
+          displayName: "Opus 5.5",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+          supportsFastMode: true,
+        },
+        { value: "claude-haiku-4-5", resolvedModel: "claude-haiku-4-5", displayName: "Haiku 4.5" },
+      ],
+      true,
+    );
+    expect(models).toEqual([
+      { id: "opus", name: "Opus 5.5", isDefault: true, efforts: ["low", "high"], fast: true, fastNote: expect.any(String) },
+      { id: "claude-haiku-4-5", name: "Haiku 4.5" },
+    ]);
+    // Fast mode is left out when the account cannot use it.
+    expect(claudeModels([{ value: "opus", displayName: "Opus", supportsFastMode: true }], false)[0]!.fast).toBeUndefined();
   });
 });
 

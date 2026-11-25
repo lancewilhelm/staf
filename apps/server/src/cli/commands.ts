@@ -41,18 +41,29 @@ function finishAnswer(message: Message): void {
 }
 
 /** Reads --agent, --harness, and --model, which choose who answers a new conversation. */
-function readChoice(args: string[], i: number, choice: { agentId?: string; harness?: string; model?: string }): number {
+interface CliChoice {
+  agentId?: string;
+  harness?: string;
+  model?: string;
+  effort?: string;
+  fast?: boolean;
+}
+
+function readChoice(args: string[], i: number, choice: CliChoice): number {
   const flag = args[i];
   if (flag === "--agent") choice.agentId = args[++i];
   else if (flag === "--harness") choice.harness = args[++i];
   else if (flag === "--model") choice.model = args[++i];
+  else if (flag === "--effort") choice.effort = args[++i];
+  else if (flag === "--fast") choice.fast = true;
+  else if (flag === "--no-fast") choice.fast = false;
   else return -1;
   return i;
 }
 
 export async function ask(args: string[]): Promise<number> {
   let threadId: string | null = null;
-  const choice: { agentId?: string; harness?: string; model?: string } = {};
+  const choice: CliChoice = {};
   const words: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--thread") threadId = args[++i] ?? null;
@@ -66,8 +77,9 @@ export async function ask(args: string[]): Promise<number> {
   if (!question.trim()) throw new CliError('Ask a question, for example: staf ask "Is it going to rain today?"');
 
   const api = await connect();
-  if (threadId && (choice.harness || choice.model)) {
-    await api.updateThread(threadId, { ...(choice.harness ? { harness: choice.harness } : {}), ...(choice.model ? { model: choice.model } : {}) });
+  if (threadId) {
+    const { agentId: _agentId, ...change } = choice;
+    if (Object.keys(change).length > 0) await api.updateThread(threadId, change);
   }
   threadId ??= (await api.createThread(choice)).id;
   const stop = new AbortController();
@@ -80,7 +92,7 @@ export async function ask(args: string[]): Promise<number> {
 
 export async function chat(args: string[]): Promise<number> {
   const api = await connect();
-  const choice: { agentId?: string; harness?: string; model?: string } = {};
+  const choice: CliChoice = {};
   let threadId: string | null = null;
   for (let i = 0; i < args.length; i++) {
     const next = readChoice(args, i, choice);

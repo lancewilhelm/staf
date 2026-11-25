@@ -28,6 +28,13 @@ export interface TurnRequest {
   instructions: string;
   /** Model to request, or null for the harness default. */
   model: string | null;
+  /**
+   * Reasoning level to request, or null for the model's default. Adapters ignore a level
+   * that the model does not offer.
+   */
+  effort: string | null;
+  /** Whether to use fast mode. Adapters ignore it when the model has none. */
+  fast: boolean;
   input: string;
   /**
    * The input for a new session when the saved one is gone: the earlier conversation and

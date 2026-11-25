@@ -1,6 +1,6 @@
 import type { Message } from "@staf/protocol";
 import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
-import { modelName, sendMessage, stopAnswer, useStore } from "../store.ts";
+import { modelName, sendMessage, stopAnswer, useStore, useHarnesses } from "../store.ts";
 import { ChatPill } from "./ChatPill.tsx";
 import { Composer } from "./Composer.tsx";
 import { MessageView } from "./MessageView.tsx";
@@ -82,7 +82,7 @@ export function ChatView() {
  * the answer before it.
  */
 function Switch({ messages, index }: { messages: Message[]; index: number }) {
-  const harnesses = useStore((s) => s.health?.harnesses ?? []);
+  const harnesses = useHarnesses();
   const models = useStore((s) => s.models);
   const message = messages[index]!;
   if (message.role !== "user") return null;

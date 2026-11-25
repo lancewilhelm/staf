@@ -103,7 +103,15 @@ async function handle(message: { id?: number; method?: string; params?: any }): 
         result: {
           data: [
             { id: "gpt-a", displayName: "GPT-A", hidden: false, isDefault: true },
-            { id: "gpt-b", displayName: "GPT-B", hidden: false, isDefault: false },
+            {
+              id: "gpt-b",
+              displayName: "GPT-B",
+              hidden: false,
+              isDefault: false,
+              supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }],
+              defaultReasoningEffort: "low",
+              serviceTiers: [{ id: "priority", name: "Fast", description: "2x speed" }],
+            },
             { id: "gpt-hidden", displayName: "Hidden", hidden: true, isDefault: false },
           ],
           nextCursor: null,

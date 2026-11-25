@@ -40,19 +40,21 @@ export class ChatService {
 
   createThread(
     agentId = DEFAULT_AGENT_ID,
-    choice: { harness?: string; model?: string | null } = {},
+    choice: { harness?: string; model?: string | null; effort?: string | null; fast?: boolean } = {},
   ): ThreadSummary {
     const agent = this.loadAgent(agentId);
     if (!agent) throw new ChatError(404, `There is no agent named "${agentId}".`);
     const harness = this.harnessOverride ?? choice.harness ?? agent.harness;
     this.checkHarness(harness, choice.harness ? null : agent.id);
-    // A harness picked for this conversation starts on its own default model.
-    const model = choice.model !== undefined ? choice.model : choice.harness && choice.harness !== agent.harness ? null : agent.model;
+    // A harness picked for this conversation starts on its own defaults.
+    const other = choice.harness !== undefined && choice.harness !== agent.harness;
     const thread = this.store.createThread({
       title: "New chat",
       agentId: agent.id,
       harness,
-      model,
+      model: choice.model !== undefined ? choice.model : other ? null : agent.model,
+      effort: choice.effort !== undefined ? choice.effort : other ? null : agent.effort,
+      fast: choice.fast ?? (other ? false : agent.fast),
     });
     const summary = publicThread(thread);
     this.bus.publish({ type: "thread.upserted", thread: summary });
@@ -70,8 +72,9 @@ export class ChatService {
   }
 
   /**
-   * Changes the harness or model of a conversation from the next message on. A new harness
-   * starts a new session, which receives the earlier conversation with the next message.
+   * Changes the harness, model, reasoning level, or fast mode of a conversation from the next
+   * message on. A new harness starts a new session, which receives the earlier conversation
+   * with the next message.
    */
   updateThread(id: string, change: UpdateThreadRequest): ThreadSummary {
     const thread = this.store.getThread(id);
@@ -80,10 +83,11 @@ export class ChatService {
     const harness = change.harness ?? thread.harness;
     if (change.harness !== undefined) this.checkHarness(harness, null);
     const switching = harness !== thread.harness;
-    const model = change.model !== undefined ? change.model : switching ? null : thread.model;
     const updated = this.store.updateThread(id, {
       harness,
-      model,
+      model: change.model !== undefined ? change.model : switching ? null : thread.model,
+      effort: change.effort !== undefined ? change.effort : switching ? null : thread.effort,
+      fast: change.fast ?? (switching ? false : thread.fast),
       ...(switching ? { sessionId: null } : {}),
     })!;
     const summary = publicThread(updated);
@@ -178,6 +182,8 @@ export class ChatService {
       access: agent.access,
       instructions: chatInstructions(agent),
       model: thread.model,
+      effort: thread.effort,
+      fast: thread.fast,
       input,
       ...(withHistory ? { inputWithHistory: withHistory } : {}),
       message: assistantMessage,
@@ -218,6 +224,8 @@ export class ChatService {
     access: AgentAccess;
     instructions: string;
     model: string | null;
+    effort: string | null;
+    fast: boolean;
     input: string;
     inputWithHistory?: string;
     message: Message;
@@ -271,6 +279,8 @@ export class ChatService {
             access: input.access,
             instructions: input.instructions,
             model: input.model,
+            effort: input.effort,
+            fast: input.fast,
             input: input.input,
             ...(input.inputWithHistory ? { inputWithHistory: input.inputWithHistory } : {}),
             signal: input.signal,

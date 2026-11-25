@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { activityFromToolCall, defaultPermission, isInside } from "../src/harness/acp/adapter.ts";
 import { antigravityAdapter, deleteAntigravitySession } from "../src/harness/acp/antigravity.ts";
 import type { HarnessAdapter, HarnessEvent, TurnRequest } from "../src/harness/types.ts";
+import { groupLevels, resolveLevel } from "../src/harness/acp/levels.ts";
 
 const fixture = join(import.meta.dir, "fixtures", "fake-acp.ts");
 const adapters: HarnessAdapter[] = [];
@@ -42,6 +43,8 @@ function turn(workspace: string, overrides: Partial<TurnRequest> = {}) {
     access: { network: true, harnessApps: [], writableFolders: [] },
     instructions: "Be brief.",
     model: null,
+    effort: null,
+    fast: false,
     input: "Weather?",
     signal: controller.signal,
     emit: (event) => events.push(event),
@@ -215,15 +218,47 @@ describe("Antigravity models and deletion", () => {
     expect(switches).toEqual(["gem-low", "gem-high"]);
   });
 
+  test("turns a model and reasoning level into the matching Antigravity model", async () => {
+    const { adapter, workspace, sent } = setup();
+    await adapter.runTurn(turn(workspace).request);
+    await adapter.runTurn(turn(workspace, { sessionId: "session-1", model: "gem", effort: "low" }).request);
+    await adapter.runTurn(turn(workspace, { sessionId: "session-1", model: "gem", effort: null }).request);
+    await adapter.runTurn(turn(workspace, { sessionId: "session-1", model: null, effort: "low" }).request);
+    const switches = sent().filter((m) => m.method === "session/set_model").map((m) => m.params.modelId);
+    expect(switches).toEqual(["gem-low", "gem-high", "gem-low"]);
+  });
+
   test("lists models from a session that it then deletes, and caches the list", async () => {
     const { adapter, dir, sent } = setup();
     const models = await adapter.listModels();
-    expect(models).toEqual([
-      { id: "gem-high", name: "Gem (High)", isDefault: true },
-      { id: "gem-low", name: "Gem (Low)" },
-    ]);
+    // Each level is its own model in Antigravity. Staf shows one model with its levels.
+    expect(models).toEqual([{ id: "gem", name: "Gem", isDefault: true, efforts: ["low", "high"], defaultEffort: "high" }]);
     expect(sent().filter((m) => m.method === "session/close")).toHaveLength(1);
     expect(JSON.parse(readFileSync(join(dir, "home", "staf-models.json"), "utf8")).defaultId).toBe("gem-high");
+  });
+
+  test("merges levels only for models that come in several levels", () => {
+    const raw = [
+      { id: "neon-high", name: "Neon (High)", isDefault: true },
+      { id: "neon-low", name: "Neon (Low)" },
+      { id: "carbon-low", name: "Carbon (Low)" },
+      { id: "carbon-medium", name: "Carbon (Medium)" },
+      { id: "carbon-high", name: "Carbon (High)" },
+      { id: "orchestrator", name: "Orchestrator (Neon)" },
+      { id: "oss-medium", name: "OSS (Medium)" },
+    ];
+    expect(groupLevels(raw)).toEqual([
+      { id: "neon", name: "Neon", isDefault: true, efforts: ["low", "high"], defaultEffort: "high" },
+      // The default model's level is used where the model has it.
+      { id: "carbon", name: "Carbon", efforts: ["low", "medium", "high"], defaultEffort: "high" },
+      { id: "orchestrator", name: "Orchestrator (Neon)" },
+      { id: "oss-medium", name: "OSS (Medium)" },
+    ]);
+    expect(resolveLevel(raw, "carbon", null)).toBe("carbon-high");
+    expect(resolveLevel(raw, "carbon", "medium")).toBe("carbon-medium");
+    expect(resolveLevel(raw, "carbon", "xhigh")).toBe("carbon-high");
+    expect(resolveLevel(raw, "oss-medium", "high")).toBe("oss-medium");
+    expect(resolveLevel(raw, null, null)).toBe("neon-high");
   });
 
   test("deletes a conversation's files and summary", () => {

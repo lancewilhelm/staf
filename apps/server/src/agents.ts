@@ -11,6 +11,10 @@ export interface AgentSettings {
   harness: string;
   /** Model to request, or null to use the harness default. */
   model: string | null;
+  /** Reasoning level to request, such as "high", or null for the model's default. */
+  effort: string | null;
+  /** Whether to use the harness's fast mode, which costs more. */
+  fast: boolean;
   /** Whether commands that the agent runs may use the network. Web search works either way. */
   network: boolean;
   /**
@@ -35,6 +39,8 @@ export interface Agent {
   name: string;
   harness: string;
   model: string | null;
+  effort: string | null;
+  fast: boolean;
   access: AgentAccess;
   /** The agent's folder, which holds its settings and instructions. The agent cannot write here. */
   dir: string;
@@ -62,6 +68,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   name: "Staf",
   harness: "codex",
   model: null,
+  effort: null,
+  fast: false,
   network: true,
   harnessApps: [],
   writableFolders: [],
@@ -85,6 +93,8 @@ export interface AgentEdit {
   name?: string;
   harness?: string;
   model?: string | null;
+  effort?: string | null;
+  fast?: boolean;
   instructions?: string;
 }
 
@@ -160,6 +170,8 @@ export class Agents {
       name: settings.name,
       harness: settings.harness,
       model: settings.model,
+      effort: settings.effort,
+      fast: settings.fast,
       access: {
         network: settings.network,
         harnessApps: settings.harnessApps,
@@ -180,14 +192,21 @@ export class Agents {
     for (let n = 2; existsSync(join(this.root, id)); n++) id = `${base}-${n}`.slice(0, 63);
     const dir = join(this.root, id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const settings: AgentSettings = { ...DEFAULT_SETTINGS, name, harness: input.harness, model: input.model };
+    const settings: AgentSettings = {
+      ...DEFAULT_SETTINGS,
+      name,
+      harness: input.harness,
+      model: input.model,
+      effort: input.effort,
+      fast: input.fast,
+    };
     writeFileSync(join(dir, "agent.json"), JSON.stringify(settings, null, 2) + "\n");
     writeFileSync(join(dir, "AGENTS.md"), input.instructions);
     return this.get(id)!;
   }
 
   /**
-   * Changes an agent's name, harness, model, or instructions. Other fields in agent.json,
+   * Changes an agent's name, harness, model, reasoning level, fast mode, or instructions. Other fields in agent.json,
    * including ones that Staf does not know, are kept as they are.
    */
   update(id: string, edit: AgentEdit): Agent {
@@ -198,6 +217,8 @@ export class Agents {
     if (edit.name !== undefined) raw.name = checkName(edit.name);
     if (edit.harness !== undefined) raw.harness = edit.harness;
     if (edit.model !== undefined) raw.model = edit.model;
+    if (edit.effort !== undefined) raw.effort = edit.effort;
+    if (edit.fast !== undefined) raw.fast = edit.fast;
     parseSettings(id, raw);
     writeFileSync(settingsPath, JSON.stringify(raw, null, 2) + "\n");
     if (edit.instructions !== undefined) {
@@ -294,6 +315,8 @@ function parseSettings(id: string, raw: unknown): AgentSettings {
     name: field("name", isString, "a non-empty string"),
     harness: field("harness", isString, "a harness name such as \"codex\""),
     model: field("model", isNullableString, "a model name or null"),
+    effort: field("effort", isNullableString, "a reasoning level such as \"high\", or null"),
+    fast: field("fast", isBoolean, "true or false"),
     network: field("network", isBoolean, "true or false"),
     harnessApps: field("harnessApps", isStringList, "a list of app names or IDs"),
     writableFolders: field("writableFolders", isStringList, "a list of folder paths"),

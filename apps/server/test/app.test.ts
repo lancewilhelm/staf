@@ -196,7 +196,7 @@ describe("Store", () => {
   test("marks answers that a previous process left unfinished", () => {
     const home = mkdtempSync(join(tmpdir(), "staf-store-"));
     const store = new Store(join(home, "staf.db"));
-    const thread = store.createThread({ title: "t", agentId: "default", harness: "fake", model: null });
+    const thread = store.createThread({ title: "t", agentId: "default", harness: "fake", model: null, effort: null, fast: false });
     store.updateThread(thread.id, { status: "running" });
     const message = store.addMessage({ threadId: thread.id, role: "assistant", text: "", status: "streaming" });
 
@@ -230,7 +230,7 @@ async function ask(client: StafClient, threadId: string, text: string) {
 describe("agents over HTTP", () => {
   test("creates, edits, and deletes agents, and keeps access settings out of reach", async () => {
     const { client, paths, alpha } = startTwo();
-    const created = await client.createAgent({ name: "Morning Paper", harness: "beta", model: null, instructions: "Write the paper." });
+    const created = await client.createAgent({ name: "Morning Paper", harness: "beta", model: null, effort: null, fast: false, instructions: "Write the paper." });
     expect(created).toMatchObject({ id: "morning-paper", name: "Morning Paper", harness: "beta", network: true, isDefault: false });
 
     // Access fields in the request are ignored.
@@ -244,7 +244,7 @@ describe("agents over HTTP", () => {
     const saved = JSON.parse(readFileSync(join(paths.agents, "morning-paper", "agent.json"), "utf8"));
     expect(saved).toMatchObject({ name: "Paper", model: "fake-large", network: true, writableFolders: [] });
 
-    await expect(client.createAgent({ name: "X", harness: "nope", model: null, instructions: "" })).rejects.toThrow(/does not have/);
+    await expect(client.createAgent({ name: "X", harness: "nope", model: null, effort: null, fast: false, instructions: "" })).rejects.toThrow(/does not have/);
     await expect(client.deleteAgent("default")).rejects.toThrow(/cannot be deleted/);
 
     // Deleting an agent deletes its conversations and moves its folder to the trash.
@@ -315,6 +315,32 @@ describe("changing the harness of a conversation", () => {
     expect(await client.createThread()).toMatchObject({ harness: "alpha", model: "fake-large" });
     expect(await client.createThread({ harness: "beta" })).toMatchObject({ harness: "beta", model: null });
     expect(await client.createThread({ harness: "beta", model: "fake-small" })).toMatchObject({ model: "fake-small" });
+  });
+
+  test("passes the reasoning level and fast mode, and resets them on another harness", async () => {
+    const { client, alpha, beta, paths } = startTwo();
+    await client.updateAgent("default", { harness: "alpha", model: "fake-large", effort: "high", fast: true });
+    expect(JSON.parse(readFileSync(join(paths.agents, "default", "agent.json"), "utf8"))).toMatchObject({
+      effort: "high",
+      fast: true,
+    });
+    const thread = await client.createThread();
+    expect(thread).toMatchObject({ effort: "high", fast: true });
+    await ask(client, thread.id, "Hi");
+    expect(alpha.requests.at(-1)).toMatchObject({ model: "fake-large", effort: "high", fast: true });
+
+    expect(await client.updateThread(thread.id, { effort: "low", fast: false })).toMatchObject({ effort: "low", fast: false });
+    await ask(client, thread.id, "Again");
+    expect(alpha.requests.at(-1)).toMatchObject({ effort: "low", fast: false });
+    // A change of level keeps the harness session.
+    expect(alpha.requests.at(-1)!.sessionId).toStartWith("fake-");
+
+    expect(await client.updateThread(thread.id, { harness: "beta" })).toMatchObject({ model: null, effort: null, fast: false });
+    await ask(client, thread.id, "Elsewhere");
+    expect(beta.requests.at(-1)).toMatchObject({ model: null, effort: null, fast: false });
+
+    await expect(client.updateThread(thread.id, { effort: "Very High!" })).rejects.toThrow(/reasoning level/);
+    await expect(client.updateThread(thread.id, { fast: "yes" as never })).rejects.toThrow(/true or false/);
   });
 
   test("keeps the conversation when a harness cannot delete its copy", async () => {

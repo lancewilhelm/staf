@@ -27,13 +27,22 @@ export interface State {
    * A harness and model picked for the next new chat instead of the agent's defaults.
    * Undefined fields use the agent's setting.
    */
-  draft: { harness?: string; model?: string | null };
+  /** Changes to the agent's defaults for the next new chat. */
+  draft: Partial<Choice>;
   /** Model lists by harness, loaded when someone opens a picker. */
   models: Record<string, ModelList>;
   settings: SettingsView | null;
   connection: Connection;
   /** The last error from an action, shown once to the person. */
   error: string | null;
+}
+
+/** How a conversation is answered: by which harness and model, at which level, how fast. */
+export interface Choice {
+  harness: string;
+  model: string | null;
+  effort: string | null;
+  fast: boolean;
 }
 
 export type ModelList = { status: "loading" } | { status: "ready"; list: ModelInfo[] } | { status: "error"; error: string };
@@ -61,6 +70,14 @@ function set(patch: Partial<State> | ((current: State) => Partial<State>)): void
   const next = typeof patch === "function" ? patch(state) : patch;
   state = { ...state, ...next };
   for (const listener of listeners) listener();
+}
+
+const NO_HARNESSES: HealthInfo["harnesses"] = [];
+
+/** The harnesses from the last health check. The fallback is one shared array, because a
+ *  new array on every read makes useSyncExternalStore render forever. */
+export function useHarnesses(): HealthInfo["harnesses"] {
+  return useStore((s) => s.health?.harnesses ?? NO_HARNESSES);
 }
 
 export function useStore<T>(select: (state: State) => T): T {
@@ -154,6 +171,20 @@ export async function loadModels(harness: string, options: { force?: boolean } =
   }
 }
 
+/** The model entry for a model ID, or for the default when the ID is null, once the list has loaded. */
+export function modelInfo(models: Record<string, ModelList>, harness: string, model: string | null): ModelInfo | null {
+  const list = models[harness];
+  if (list?.status !== "ready") return null;
+  return list.list.find((m) => (model ? m.id === model : m.isDefault)) ?? null;
+}
+
+const EFFORT_NAMES: Record<string, string> = { xhigh: "Extra high" };
+
+/** The name to show for a reasoning level, such as "High" for "high". */
+export function effortName(effort: string): string {
+  return EFFORT_NAMES[effort] ?? effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
 /** The name to show for a model ID, from the loaded lists. */
 export function modelName(models: Record<string, ModelList>, harness: string, model: string | null | undefined): string | null {
   if (!model) return null;
@@ -163,21 +194,27 @@ export function modelName(models: Record<string, ModelList>, harness: string, mo
 }
 
 /**
- * Picks the harness and model: for the open conversation from its next message on, or
+ * Changes how answers are made: for the open conversation from its next message on, or
  * for the next new chat.
  */
-export async function chooseHarnessModel(harness: string, model: string | null): Promise<void> {
+export async function choose(change: Partial<Choice>): Promise<void> {
   if (state.threadId) {
     try {
-      await api.updateThread(state.threadId, { harness, model });
+      await api.updateThread(state.threadId, change);
     } catch (error) {
       report(error);
     }
     return;
   }
   const agent = state.agents.find((a) => a.id === state.agentId);
-  const same = agent && agent.harness === harness && agent.model === model;
-  set({ draft: same ? {} : { harness, model } });
+  const draft = { ...state.draft, ...change };
+  const same =
+    agent &&
+    (draft.harness ?? agent.harness) === agent.harness &&
+    (draft.model === undefined ? agent.model : draft.model) === agent.model &&
+    (draft.effort === undefined ? agent.effort : draft.effort) === agent.effort &&
+    (draft.fast ?? agent.fast) === agent.fast;
+  set({ draft: same ? {} : draft });
 }
 
 export function openSettings(view: SettingsView = { section: "agents", agentId: null }): void {

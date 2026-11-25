@@ -38,6 +38,8 @@ function turn(overrides: Partial<TurnRequest> = {}) {
     access: { network: true, harnessApps: [], writableFolders: [] },
     instructions: "Be brief.",
     model: null,
+    effort: null,
+    fast: false,
     input: "What leads AP?",
     signal: controller.signal,
     emit: (event) => events.push(event),
@@ -170,12 +172,29 @@ describe("CodexAdapter models, sign-in, and deletion", () => {
     const { adapter, requests } = setup();
     expect(await adapter.listModels()).toEqual([
       { id: "gpt-a", name: "GPT-A", isDefault: true },
-      { id: "gpt-b", name: "GPT-B" },
+      { id: "gpt-b", name: "GPT-B", efforts: ["low", "high"], defaultEffort: "low", fast: true, fastNote: "2x speed" },
     ]);
     await adapter.runTurn(turn().request);
     await adapter.runTurn(turn({ sessionId: "thread-1", model: "gpt-b" }).request);
     const starts = requests().filter((r) => r.method === "turn/start");
     expect(starts.map((r) => r.params.model)).toEqual(["gpt-a", "gpt-b"]);
+  });
+
+  test("sends the reasoning level and fast tier, and leaves out what the model lacks", async () => {
+    const { adapter, requests } = setup();
+    await adapter.runTurn(turn({ model: "gpt-b", effort: "high", fast: true }).request);
+    await adapter.runTurn(turn({ sessionId: "thread-1", model: "gpt-b", effort: null, fast: false }).request);
+    await adapter.runTurn(turn({ sessionId: "thread-1", model: "gpt-a", effort: "high", fast: true }).request);
+    const starts = requests()
+      .filter((r) => r.method === "turn/start")
+      .map((r) => ({ effort: r.params.effort, serviceTier: r.params.serviceTier }));
+    expect(starts).toEqual([
+      { effort: "high", serviceTier: "priority" },
+      // Back to the model's own level, and fast mode cleared.
+      { effort: "low", serviceTier: null },
+      // GPT-A has neither.
+      { effort: undefined, serviceTier: null },
+    ]);
   });
 
   test("deletes a thread, and treats a missing one as deleted", async () => {

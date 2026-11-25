@@ -5,7 +5,8 @@ through Codex, Gemini through Antigravity, and Claude through Claude Code) and g
 a simple chat interface in the browser and the terminal. Read the [specification](docs/spec.md) for the design and the delivery plan.
 
 Status: slice 1 is done. Chat works in the web app and the CLI on all three harnesses.
-Agents are created in Settings, and each conversation can switch provider and model.
+Agents are created in Settings, and each conversation can switch provider, model,
+reasoning level, and fast mode.
 
 ## Documentation
 

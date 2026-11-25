@@ -11,6 +11,10 @@ export interface ThreadSummary {
   harness: string;
   /** Model that the thread asks for, or null for the harness's default. */
   model: string | null;
+  /** Reasoning level, such as "high", or null for the model's default. */
+  effort: string | null;
+  /** Whether answers use the harness's faster, more expensive mode. */
+  fast: boolean;
   status: ThreadStatus;
   /** Unix time in milliseconds. */
   createdAt: number;
@@ -76,6 +80,10 @@ export interface AgentSummary {
   harnessLabel: string;
   /** The default model, or null for the harness's default. */
   model: string | null;
+  /** The default reasoning level, or null for the model's default. */
+  effort: string | null;
+  /** Whether new conversations use fast mode. */
+  fast: boolean;
   /** The contents of AGENTS.md. */
   instructions: string;
   /** Access settings. They are edited in agent.json, not through the API. */
@@ -91,6 +99,8 @@ export interface AgentInput {
   name: string;
   harness: string;
   model: string | null;
+  effort: string | null;
+  fast: boolean;
   instructions: string;
 }
 
@@ -120,6 +130,14 @@ export interface ModelInfo {
   name: string;
   /** The model that the harness uses when none is chosen. */
   isDefault?: boolean;
+  /** Reasoning levels that a conversation can pick, lowest first. Absent when there is no choice. */
+  efforts?: string[];
+  /** The level that the model uses when none is picked. */
+  defaultEffort?: string;
+  /** Whether the model has a fast mode. */
+  fast?: boolean;
+  /** What fast mode does and costs, such as "2x speed, increased usage". */
+  fastNote?: string;
 }
 
 export interface HealthInfo {
@@ -133,12 +151,18 @@ export interface CreateThreadRequest {
   harness?: string;
   /** Overrides the agent's default model. Null asks for the harness's default. */
   model?: string | null;
+  /** Overrides the agent's default reasoning level. Null asks for the model's default. */
+  effort?: string | null;
+  /** Overrides the agent's fast mode setting. */
+  fast?: boolean;
 }
 
-/** Changes the harness or model of a conversation from the next message on. */
+/** Changes how a conversation is answered from the next message on. */
 export interface UpdateThreadRequest {
   harness?: string;
   model?: string | null;
+  effort?: string | null;
+  fast?: boolean;
 }
 
 export interface LoginStart {

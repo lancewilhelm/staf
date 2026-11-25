@@ -13,8 +13,10 @@ Usage:
                              --agent <id>     pick an agent
                              --harness <id>   use another harness: codex, claude, antigravity
                              --model <id>     use another model
+                             --effort <level> reasoning level, such as low or high
+                             --fast, --no-fast  turn fast mode on or off (it costs more)
                              --thread <id>    continue a conversation
-  staf chat [thread-id]      Chat in the terminal (takes --agent, --harness, --model)
+  staf chat [thread-id]      Chat in the terminal (takes the same options, except --thread)
   staf threads               List conversations
   staf status                Show whether the host and harnesses are ready
   staf login codex           Sign Staf in to ChatGPT through Codex

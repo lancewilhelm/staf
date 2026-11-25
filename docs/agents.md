@@ -32,7 +32,9 @@ defaults shown.
 |---|---|---|
 | `name` | `"Staf"` | The name shown for the agent. |
 | `harness` | `"codex"` | The default harness for new conversations: `codex`, `antigravity`, or `claude`. See below. |
-| `model` | `null` | The default model, such as `"gpt-6.2-sol"`, `"sonnet"`, or `"gemini-4-neon-low"`, or `null` for the harness's default. |
+| `model` | `null` | The default model, such as `"gpt-6.2-sol"`, `"sonnet"`, or `"gemini-4-neon"`, or `null` for the harness's default. |
+| `effort` | `null` | The default reasoning level, such as `"low"` or `"high"`, or `null` for the model's default. A level that the model does not offer is ignored. |
+| `fast` | `false` | Whether to use the harness's fast mode. It costs more; see below. |
 | `network` | `true` | Whether commands that the agent runs can reach the network. Web search works either way. |
 | `harnessApps` | `[]` | Apps that come with the harness account, by name or ID. See below. |
 | `writableFolders` | `[]` | Extra folders that the agent may write to, as absolute paths or paths starting with `~/`. |
@@ -119,20 +121,21 @@ An agent that only answers from the web, with no network access for its own comm
 }
 ```
 
-A Gemini agent that uses a faster model:
+A Gemini agent that thinks less, for faster answers:
 
 ```json
 {
   "name": "Gemini",
   "harness": "antigravity",
-  "model": "gemini-4-neon-low"
+  "model": "gemini-4-neon",
+  "effort": "low"
 }
 ```
 
 ## Creating and editing agents
 
 Open **Settings → Agents** in the web app. There you can create an agent, and change an
-agent's name, default provider, default model, and instructions. Staf names the folder
+agent's name, default provider, model, reasoning level, fast mode, and instructions. Staf names the folder
 after the agent, for example `morning-paper` for "Morning Paper".
 
 **Access settings** (`network`, `writableFolders`, and `harnessApps`) are shown there but
@@ -158,29 +161,50 @@ be deleted.
 
 ## Choosing the provider and model for one conversation
 
-The pill under the message box shows the agent, and the model or provider, such as
-"Staf · ChatGPT". Its menu picks:
+The pill under the message box shows the model or provider, and the reasoning level and
+fast mode when they are set, such as "Opus 5.5 · High · Fast". Once there is more than one
+agent, it starts with the agent's name. Its menu picks:
 
 - **The agent,** for a new chat.
-- **The provider and model,** for this conversation. A new chat starts with the agent's
-  defaults.
+- **The provider, model, reasoning level, and fast mode,** for this conversation. A new
+  chat starts with the agent's defaults. The menu shows only the levels and the fast mode
+  that the chosen model offers.
 
 During a conversation:
 
-- **Another model on the same provider** applies from the next message.
+- **Another model, level, or fast setting on the same provider** applies from the next
+  message.
 - **Another provider** starts a new session on that provider. Staf passes it the earlier
   questions and answers as text, but not the details of earlier steps, such as command
   output. A divider in the conversation marks the switch.
 
-In the terminal, `staf ask` and `staf chat` take `--harness` and `--model`:
+In the terminal, `staf ask` and `staf chat` take `--harness`, `--model`, `--effort`, and
+`--fast` or `--no-fast`:
 
 ```sh
-staf ask --harness claude --model haiku "Summarize today's weather in Lisbon."
+staf ask --harness claude --model haiku --effort low "Summarize today's weather in Lisbon."
 staf ask --thread <id> --model gpt-6.2-astra "Now in two sentences."
 ```
 
-Model IDs come from each harness. Settings lists them; Claude accepts the aliases `opus`,
-`sonnet`, and `haiku`.
+Model IDs come from each harness, and Settings lists them:
+
+- **ChatGPT** lists its models and the levels of each, from `low` to `ultra`.
+- **Claude** lists aliases such as `opus` (the newest Opus) and full model IDs such as
+  `claude-opus-4-8`. An alias moves to the next model when Anthropic releases one.
+- **Gemini** lists each level as a separate model, such as `gemini-4-neon-high`. Staf
+  shows one model, `gemini-4-neon`, with its levels, and asks Antigravity for the matching
+  one.
+
+### Fast mode costs more
+
+| Provider | Fast mode | Cost |
+|---|---|---|
+| ChatGPT | Codex's "Fast" service tier, 1.5–2× faster | Uses more of the ChatGPT plan's limits on most models |
+| Claude | Claude Code's fast mode, on Opus and Fable models | **Billed to usage credits on top of the Claude plan**, so it costs money |
+| Gemini | None | |
+
+Fast mode is off unless an agent or a conversation turns it on. Staf shows what it costs
+next to the switch.
 
 ## What Staf adds to the instructions
 

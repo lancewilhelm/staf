@@ -1,11 +1,21 @@
-import type { HarnessInfo } from "@staf/protocol";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { chooseAgent, chooseHarnessModel, loadModels, modelName, openSettings, useStore } from "../store.ts";
+import type { HarnessInfo, ModelInfo } from "@staf/protocol";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  choose,
+  chooseAgent,
+  effortName,
+  loadModels,
+  modelInfo,
+  modelName,
+  openSettings,
+  useHarnesses,
+  useStore,
+} from "../store.ts";
 import { Icon } from "./Icon.tsx";
 
 /**
- * The small pill under the composer. It shows who answers (agent, harness, model) and
- * opens a menu to change it: the agent for a new chat, and the harness and model for this
+ * The small pill under the composer. It shows who answers (agent, harness, model, level)
+ * and opens a menu to change it: the agent for a new chat, and the rest for this
  * conversation.
  */
 export function ChatPill({ direction }: { direction: "up" | "down" }) {
@@ -16,19 +26,36 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
   const agents = useStore((s) => s.agents);
   const agentId = useStore((s) => s.agentId);
   const draft = useStore((s) => s.draft);
-  const harnesses = useStore((s) => s.health?.harnesses ?? []);
+  const harnesses = useHarnesses();
   const models = useStore((s) => s.models);
 
   const agent = agents.find((a) => a.id === (thread?.agentId ?? agentId)) ?? null;
   const harnessId = thread?.harness ?? draft.harness ?? agent?.harness ?? "codex";
   const model = thread ? thread.model : draft.model !== undefined ? draft.model : (agent?.model ?? null);
+  const effort = thread ? thread.effort : draft.effort !== undefined ? draft.effort : (agent?.effort ?? null);
+  const fast = thread ? thread.fast : (draft.fast ?? agent?.fast ?? false);
   const harness = harnesses.find((h) => h.id === harnessId) ?? null;
   const running = thread?.status === "running";
+  const info = modelInfo(models, harnessId, model);
 
   useEffect(() => {
     // Model names for the label come from the list, so load it once.
-    if (model) void loadModels(harnessId);
-  }, [harnessId, model]);
+    if (model || effort || fast) void loadModels(harnessId);
+  }, [harnessId, model, effort, fast]);
+
+  // The menu may not reach past the window, so its height follows the space beside the pill.
+  const [room, setRoom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const box = root.current?.getBoundingClientRect();
+      if (!box) return;
+      setRoom(Math.max(200, (direction === "up" ? box.top : window.innerHeight - box.bottom) - 16));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [open, direction]);
 
   useEffect(() => {
     if (!open) return;
@@ -47,9 +74,27 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
     };
   }, [open, harnessId]);
 
-  const label = [agent?.name ?? "Staf", modelName(models, harnessId, model) ?? harness?.label ?? harnessId].join(" · ");
+  // The agent's name matters only once there is more than one agent.
+  const label = [
+    agents.length > 1 ? (agent?.name ?? null) : null,
+    modelName(models, harnessId, model) ?? harness?.label ?? harnessId,
+    effort ? effortName(effort) : null,
+    fast ? "Fast" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const list = models[harnessId];
   const defaultModel = list?.status === "ready" ? list.list.find((m) => m.isDefault) : undefined;
+
+  /** Keeps the level and fast mode when the new model offers them. */
+  const pickModel = (next: string | null) => {
+    const nextInfo = modelInfo(models, harnessId, next);
+    void choose({
+      model: next,
+      effort: effort && nextInfo?.efforts?.includes(effort) ? effort : null,
+      fast: fast && nextInfo?.fast === true,
+    });
+  };
 
   return (
     <div className="pill-root" ref={root}>
@@ -67,49 +112,66 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
         <Icon name="down" size={14} />
       </button>
       {open && (
-        <div className={`menu ${direction}`} role="menu">
-          {!thread && agents.length > 1 && (
-            <section>
-              <h3>Agent</h3>
-              {agents.map((a) => (
-                <MenuItem key={a.id} selected={a.id === agent?.id} onClick={() => chooseAgent(a.id)}>
-                  {a.name}
+        <div className={`menu wide ${direction}`} role="menu" style={room ? { maxHeight: Math.min(560, room) } : undefined}>
+          <div className="menu-columns">
+            <div className="menu-column">
+              {!thread && agents.length > 1 && (
+                <section>
+                  <h3>Agent</h3>
+                  {agents.map((a) => (
+                    <MenuItem key={a.id} selected={a.id === agent?.id} onClick={() => chooseAgent(a.id)}>
+                      {a.name}
+                    </MenuItem>
+                  ))}
+                </section>
+              )}
+              <section>
+                <h3>Provider</h3>
+                {harnesses.map((h) => (
+                  <MenuItem
+                    key={h.id}
+                    selected={h.id === harnessId}
+                    disabled={!h.ready}
+                    hint={!h.ready ? (h.detail ?? "Not ready") : undefined}
+                    onClick={() => {
+                      if (h.id !== harnessId) void choose({ harness: h.id, model: null, effort: null, fast: false });
+                    }}
+                  >
+                    {h.label}
+                    {h.experimental && <span className="tag">Experimental</span>}
+                  </MenuItem>
+                ))}
+              </section>
+              <section className="models">
+                <h3>Model</h3>
+                <MenuItem selected={model === null} onClick={() => pickModel(null)}>
+                  Default{defaultModel ? <span className="muted"> · {defaultModel.name}</span> : null}
                 </MenuItem>
-              ))}
-            </section>
-          )}
-          <section>
-            <h3>Provider</h3>
-            {harnesses.map((h) => (
-              <MenuItem
-                key={h.id}
-                selected={h.id === harnessId}
-                disabled={!h.ready}
-                hint={!h.ready ? (h.detail ?? "Not ready") : undefined}
-                onClick={() => {
-                  if (h.id !== harnessId) void chooseHarnessModel(h.id, null);
-                }}
-              >
-                {h.label}
-                {h.experimental && <span className="tag">Experimental</span>}
-              </MenuItem>
-            ))}
-          </section>
-          <section className="models">
-            <h3>Model</h3>
-            <MenuItem selected={model === null} onClick={() => void chooseHarnessModel(harnessId, null)}>
-              Default{defaultModel ? <span className="muted"> · {defaultModel.name}</span> : null}
-            </MenuItem>
-            {list?.status === "loading" && <p className="menu-status">Loading models…</p>}
-            {list?.status === "error" && <p className="menu-status error">{list.error}</p>}
-            {list?.status === "ready" &&
-              list.list.map((m) => (
-                <MenuItem key={m.id} selected={m.id === model} onClick={() => void chooseHarnessModel(harnessId, m.id)}>
-                  {m.name}
-                </MenuItem>
-              ))}
-          </section>
-          <ProviderNote harness={harness} switching={thread !== null} />
+                {list?.status === "loading" && <p className="menu-status">Loading models…</p>}
+                {list?.status === "error" && <p className="menu-status error">{list.error}</p>}
+                {list?.status === "ready" &&
+                  list.list.map((m) => (
+                    <MenuItem key={m.id} selected={m.id === model} onClick={() => pickModel(m.id)}>
+                      {m.name}
+                    </MenuItem>
+                  ))}
+              </section>
+            </div>
+            <div className="menu-column side">
+              {info?.efforts && (
+                <section>
+                  <h3>Reasoning</h3>
+                  <EffortPicker info={info} value={effort} onChange={(next) => void choose({ effort: next })} />
+                </section>
+              )}
+              {info?.fast && (
+                <section>
+                  <FastSwitch info={info} value={fast} onChange={(next) => void choose({ fast: next })} />
+                </section>
+              )}
+              <ProviderNote harness={harness} switching={thread !== null} />
+            </div>
+          </div>
           <button
             type="button"
             className="menu-footer"
@@ -124,6 +186,67 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** A row of levels. "Default" names the model's own level when the harness reports it. */
+export function EffortPicker({
+  info,
+  value,
+  onChange,
+}: {
+  info: ModelInfo;
+  value: string | null;
+  onChange: (effort: string | null) => void;
+}) {
+  const levels = info.efforts ?? [];
+  const current = value && levels.includes(value) ? value : null;
+  return (
+    <div className="segments" role="radiogroup" aria-label="Reasoning">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={current === null}
+        className={current === null ? "selected" : ""}
+        title={info.defaultEffort ? `The model's default, ${effortName(info.defaultEffort)}` : "The model's default"}
+        onClick={() => onChange(null)}
+      >
+        Default
+      </button>
+      {levels.map((level) => (
+        <button
+          key={level}
+          type="button"
+          role="radio"
+          aria-checked={current === level}
+          className={current === level ? "selected" : ""}
+          onClick={() => onChange(level)}
+        >
+          {effortName(level)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The fast mode switch, with what it costs. */
+export function FastSwitch({
+  info,
+  value,
+  onChange,
+}: {
+  info: ModelInfo;
+  value: boolean;
+  onChange: (fast: boolean) => void;
+}) {
+  return (
+    <button type="button" role="switch" aria-checked={value} className="toggle-row" onClick={() => onChange(!value)}>
+      <span className="menu-label">
+        Fast mode
+        {info.fastNote && <span className="toggle-note">{info.fastNote}</span>}
+      </span>
+      <span className={`toggle${value ? " on" : ""}`} aria-hidden="true" />
+    </button>
   );
 }
 

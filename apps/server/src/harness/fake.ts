@@ -26,7 +26,7 @@ export class FakeHarness implements HarnessAdapter {
   async listModels(): Promise<ModelInfo[]> {
     return [
       { id: "fake-small", name: "Fake Small", isDefault: true },
-      { id: "fake-large", name: "Fake Large" },
+      { id: "fake-large", name: "Fake Large", efforts: ["low", "high"], defaultEffort: "low", fast: true },
     ];
   }
 

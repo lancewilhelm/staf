@@ -3,6 +3,23 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Fast mode is off by default
+
+Agents and conversations can turn on a harness's fast mode, but it starts off, and Staf
+shows its cost next to the switch.
+
+Why: on Claude, fast mode is billed to usage credits on top of the plan, so it costs
+money. On ChatGPT, it uses more of the plan's limits. Scheduled jobs that run with fast
+mode on would spend this without anyone watching.
+
+## 2026-11-25: Gemini's levels are shown as one model with levels
+
+Antigravity lists each reasoning level as its own model, such as "Gemini 4 Neon (High)".
+Staf merges them into one model with a list of levels, and asks Antigravity for the
+matching model.
+
+Why: the menu then works the same way for every provider: pick a model, then a level.
+
 ## 2026-11-25: Access settings are edited only in agent.json
 
 The web app and the API can change an agent's name, default provider and model, and

@@ -165,13 +165,21 @@ Each slice is used live before the next one starts.
      - **Agents are profiles.** An agent is a named assistant with its own
        instructions, workspace, and memory, and a default provider and model. For
        example, "Staf" for everyday questions and "Paper" for the newspaper.
-     - **The pill.** A small pill next to the composer shows the agent, provider, and
-       model, for example "Staf · Claude Sonnet". Its menu picks the agent for a new
-       conversation, and the provider and model for this conversation. A new
-       conversation starts with the agent's defaults.
+     - **The pill.** A small pill next to the composer shows the model or provider, and
+       the reasoning level and fast mode when they are set, for example "Opus 5.5 ·
+       High". It adds the agent's name once there is more than one agent. Its menu picks
+       the agent for a new conversation, and the provider, model, reasoning level, and
+       fast mode for this conversation. A new conversation starts with the agent's
+       defaults.
+     - **Reasoning levels and fast mode.** Each model lists the levels it offers, and
+       whether it has a fast mode. Codex takes `effort` and the `priority` service tier
+       on `turn/start`; Claude takes `--effort` and `fastMode` in `--settings`;
+       Antigravity lists each level as a separate model, which Staf merges into one model
+       with levels. Fast mode is off by default, because it costs more (see
+       [agents.md](agents.md)).
      - **Changing the model or provider during a conversation.**
-       - Another model on the same provider applies from the next message, in the same
-         harness session.
+       - Another model, level, or fast setting on the same provider applies from the next
+         message, in the same harness session.
        - Another provider starts a new harness session, because a session cannot move
          between harnesses. Staf gives the new session the earlier conversation as text,
          and the thread shows a divider such as "Switched to Claude". The new provider
@@ -181,10 +189,10 @@ Each slice is used live before the next one starts.
          where it left off.
      - **Settings window.** A popup with two sections:
        - **Agents:** create, edit, and delete agents. Each has a name, instructions,
-         default provider and model, network access, and writable folders. Each provider's models
-         come from the harness where it can list them (Codex `model/list`, ACP
-         `session/new`), and from a fixed list of aliases for Claude. Memory limits are
-         added here in slice 3.
+         default provider, model, reasoning level, and fast mode. Access settings are
+         shown but edited in `agent.json`. Each provider's models come from the harness
+         (Codex `model/list`, ACP `session/new`, and Claude Code's `initialize` request).
+         Memory limits are added here in slice 3.
        - **Providers:** sign-in status, signing in to Codex, and how to sign in to
          Claude and Antigravity, which use the machine's own sign-in.
      - **Provider notes.** Choosing a provider, for an agent or in the pill, shows one
