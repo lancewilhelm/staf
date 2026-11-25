@@ -32,6 +32,18 @@ bun run build          # compile the single binary to dist/staf
 - Tests must not start a real harness. Use the fake harness, or recorded Codex messages.
 - Build in slices, as described in the spec, and use each slice live before the next.
 
+## Documentation
+
+Docs are part of each change, not a later task:
+
+- `docs/spec.md`: the design. Update it when the design changes.
+- `docs/decisions.md`: add a dated entry, newest first, when a decision changes how Staf
+  is built or used. Say what was decided and why.
+- Guides (`docs/agents.md`, `docs/deployment.md`, and new ones as features land): update
+  them in the same commit as the behavior they describe. Mark work that is not built yet
+  as **Planned**.
+- `README.md`: keep the quick start working.
+
 ## Writing
 
 For docs, commit messages, and UI text, write plain English: keep connecting words such

@@ -6,6 +6,13 @@ terminal. Read the [specification](docs/spec.md) for the design and the delivery
 
 Status: slice 1a. Chat works in the web app and the CLI on Codex.
 
+## Documentation
+
+- [Agents](docs/agents.md): agent folders, settings, harness apps, and examples
+- [Running Staf](docs/deployment.md): where files live, backups, and the server plan
+- [Specification](docs/spec.md): the design and the delivery slices
+- [Decisions](docs/decisions.md): what was decided, and why
+
 ## Requirements
 
 - macOS or Linux
@@ -26,6 +33,7 @@ In another terminal:
 ```sh
 ./dist/staf ask "Is it going to rain tomorrow?"
 ./dist/staf chat
+./dist/staf apps              # list ChatGPT apps that an agent may be given
 ```
 
 `staf login codex` keeps its login in `~/.staf/harness/codex`. Your everyday Codex setup
@@ -42,12 +50,9 @@ bun run typecheck
 
 ## Data
 
-Staf keeps everything in `~/.staf` (set `STAF_HOME` to change it):
-
-- `staf.db`: conversations
-- `agents/default/`: the default agent's instructions (`AGENTS.md`) and settings
-  (`agent.json`). Edit `AGENTS.md` to change how Staf answers.
-- `harness/codex/`: Staf's own Codex login and configuration
+Staf keeps everything in `~/.staf` (set `STAF_HOME` to change it). Edit
+`~/.staf/agents/default/AGENTS.md` to change how Staf answers. See
+[Running Staf](docs/deployment.md) for the full layout.
 
 The host listens only on 127.0.0.1 and has no login yet. Do not expose the port to a
 network until slice 6 adds sign-in.

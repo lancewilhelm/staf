@@ -1,5 +1,5 @@
 import type { Activity, Message, SendMessageResponse, ThreadSummary } from "@staf/protocol";
-import { chatInstructions, DEFAULT_AGENT_ID, type Agents } from "./agents.ts";
+import { type Agent, AgentConfigError, type AgentAccess, chatInstructions, DEFAULT_AGENT_ID, type Agents } from "./agents.ts";
 import type { EventBus } from "./bus.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome } from "./harness/types.ts";
 import { publicThread, type Store } from "./store.ts";
@@ -37,7 +37,7 @@ export class ChatService {
   }
 
   createThread(agentId = DEFAULT_AGENT_ID): ThreadSummary {
-    const agent = this.agents.get(agentId);
+    const agent = this.loadAgent(agentId);
     if (!agent) throw new ChatError(404, `There is no agent named "${agentId}".`);
     const thread = this.store.createThread({
       title: "New chat",
@@ -82,7 +82,7 @@ export class ChatService {
     if (this.running.has(threadId)) {
       throw new ChatError(409, "Wait for the current answer to finish, or stop it first.");
     }
-    const agent = this.agents.get(thread.agentId);
+    const agent = this.loadAgent(thread.agentId);
     if (!agent) throw new ChatError(409, `The agent "${thread.agentId}" no longer exists.`);
 
     const isFirst = this.store.listMessages(threadId).length === 0;
@@ -107,7 +107,9 @@ export class ChatService {
       threadId,
       sessionId: thread.sessionId,
       harnessId: thread.harness,
-      cwd: agent.dir,
+      cwd: agent.workspace,
+      access: agent.access,
+      instructions: chatInstructions(agent),
       model: agent.model,
       input: text,
       message: assistantMessage,
@@ -117,6 +119,16 @@ export class ChatService {
       .finally(() => this.running.delete(threadId));
     this.running.set(threadId, { controller, done });
     return { userMessage, assistantMessage };
+  }
+
+  /** Loads an agent, and turns a settings problem into an error that the person can read. */
+  private loadAgent(id: string): Agent | null {
+    try {
+      return this.agents.get(id);
+    } catch (error) {
+      if (error instanceof AgentConfigError) throw new ChatError(409, error.message);
+      throw error;
+    }
   }
 
   /** Waits for every running answer to end. Used by tests and shutdown. */
@@ -135,6 +147,8 @@ export class ChatService {
     sessionId: string | null;
     harnessId: string;
     cwd: string;
+    access: AgentAccess;
+    instructions: string;
     model: string | null;
     input: string;
     message: Message;
@@ -179,7 +193,8 @@ export class ChatService {
         ? await harness.runTurn({
             sessionId: input.sessionId,
             cwd: input.cwd,
-            instructions: chatInstructions(),
+            access: input.access,
+            instructions: input.instructions,
             model: input.model,
             input: input.input,
             signal: input.signal,

@@ -34,7 +34,7 @@ lack: household integrations, schedules, an inbox, approvals, and a simple inter
 | Concept | Meaning |
 |---|---|
 | **Person** | A member of the household. Each person owns their own threads, agents, jobs, and inbox. |
-| **Agent** | A folder plus settings: an `AGENTS.md` with instructions, a `skills/` directory, working files, a harness choice, a model, and a list of allowed plugins. |
+| **Agent** | A folder with settings (`agent.json`), instructions (`AGENTS.md`), and a `workspace/` that the agent works in. Settings choose the harness, the model, network access, harness apps, and extra writable folders. See [agents.md](agents.md). |
 | **Thread** | A chat conversation with one agent. A thread stays on one harness session. |
 | **Job** | A run of an agent that a schedule or a trigger starts, such as "every day at 05:30" or "a new email arrived". |
 | **Inbox item** | Something that needs a person's attention: a job result, an approval request, or an alert. |
@@ -78,11 +78,13 @@ staf/
 ├─ staf.db                  SQLite: threads, messages, jobs, inbox
 ├─ harness/codex/           CODEX_HOME for Staf's own Codex sign-in and config
 └─ agents/<agent-id>/
-   ├─ agent.json            harness, model, allowed plugins
-   ├─ AGENTS.md             the agent's instructions
-   ├─ skills/               SKILL.md folders
-   └─ ...                   working files that the agent creates
+   ├─ agent.json            settings; the agent cannot write here
+   ├─ AGENTS.md             instructions; the agent cannot write here
+   └─ workspace/            the agent's working folder: notes, scripts, skills, outputs
 ```
+
+[deployment.md](deployment.md) describes every file, backups, and the plan for an
+always-on server and remote access.
 
 Staf uses its own harness homes, such as `~/.staf/harness/codex`. A harness home has its
 own sign-in to the shared account and its own configuration. This keeps a person's
@@ -100,6 +102,11 @@ stream normalized events, interrupt the turn, and report whether the harness is 
 | Antigravity | `agy acp` | `AGENTS.md` in the agent folder | `mcpServers` in ACP `session/new` |
 | Claude | `claude --input-format stream-json --output-format stream-json` | `--append-system-prompt` | `--mcp-config`, with approvals through `--permission-prompt-tool` |
 | Hermes (optional) | `hermes acp` | `AGENTS.md` | ACP `mcpServers` |
+
+Agent settings reach the harness as one neutral `access` value (network, harness apps,
+writable folders), and each adapter turns it into harness settings. For Codex, harness
+apps, computer use, browser use, and plugins are off unless an agent allows specific
+apps.
 
 Normalized events: text deltas for the answer, activities (web search, command, tool
 call, file change, commentary) with a status, and a final outcome (completed, failed, or
@@ -137,7 +144,10 @@ the same way whichever harness made the call.
 - Until slice 6, the host listens only on 127.0.0.1 and has no login. Any local process
   can use it. Slice 6 adds people, sign-in, and access from the home network.
 - Harness runs use each harness's sandbox. For Codex, chat runs in `workspace-write`
-  mode inside the agent folder, and commands never ask for escalation.
+  mode in the agent's workspace, and commands never ask for escalation. The agent's
+  settings and instructions sit outside the workspace, so the agent cannot change them.
+- Apps that come with a harness account are off by default, because the household
+  shares one login. See [decisions.md](decisions.md).
 - Secrets for plugins live in the Staf store, never in agent folders. Harnesses never
   see plugin credentials; they only call Staf tools.
 - Email and web content can contain prompt injection. Tools that act on the outside
@@ -158,9 +168,17 @@ Each slice is used live before the next one starts.
 4. **Gmail.** Setup, a trigger for new mail, inbox monitoring, the personal feed that
    `morning-intel` reads, and approvals for sending mail.
 5. **People.** A second person's account, their own agents and jobs, and per-person scoping.
+   Only agents owned by the account holder may allow harness apps.
 6. **Reach.** Sign-in, home-network access, the PWA, and push notifications.
 
 Later: voice, an Expo app, Hermes as a harness, and more plugins.
+
+## Known gaps
+
+- Codex sometimes runs commands through its `exec` tool ("code mode"), which runs a
+  short script. The app server does not report those calls, so they do not appear in
+  an answer's step list. Turning off the `code_mode_host` feature did not stop it.
+  Look for a supported way to see or disable these calls.
 
 ## Out of scope
 

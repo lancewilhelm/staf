@@ -37,7 +37,7 @@ export function createApp(options: AppOptions): App {
 
   const store = new Store(paths.db);
   store.recoverInterrupted();
-  const agents = new Agents(paths.agents);
+  const agents = new Agents(paths.agents, paths.home);
   agents.ensureDefault();
   const bus = new EventBus();
 

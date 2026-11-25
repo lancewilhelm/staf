@@ -85,6 +85,18 @@ async function handle(message: { id?: number; method?: string; params?: any }): 
       } else await runAnswer(params.threadId, turnId);
       return;
     }
+    case "app/list":
+      send({
+        id,
+        result: {
+          data: [
+            { id: "connector_gmail", name: "Gmail", isAccessible: true },
+            { id: "connector_expedia", name: "Expedia", isAccessible: true },
+          ],
+          nextCursor: null,
+        },
+      });
+      return;
     case "turn/interrupt":
       send({ id, result: {} });
       if (slowTurn) completeTurn(slowTurn.threadId, slowTurn.turnId, "interrupted");

@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { type Activity, type Message, StafApiError, StafClient } from "@staf/protocol";
 import { resolvePaths, resolveServerUrl } from "../config.ts";
+import { CodexAdapter } from "../harness/codex/adapter.ts";
 import { streamAnswer, type AnswerOutput } from "./stream.ts";
 
 const tty = process.stdout.isTTY === true;
@@ -41,16 +42,18 @@ function finishAnswer(message: Message): void {
 
 export async function ask(args: string[]): Promise<number> {
   let threadId: string | null = null;
+  let agentId: string | undefined;
   const words: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--thread") threadId = args[++i] ?? null;
+    else if (args[i] === "--agent") agentId = args[++i];
     else words.push(args[i]!);
   }
   const question = words.join(" ").trim() || (process.stdin.isTTY ? "" : await Bun.stdin.text());
   if (!question.trim()) throw new CliError('Ask a question, for example: staf ask "Is it going to rain today?"');
 
   const api = await connect();
-  threadId ??= (await api.createThread()).id;
+  threadId ??= (await api.createThread({ agentId })).id;
   const stop = new AbortController();
   process.once("SIGINT", () => stop.abort());
   const message = await streamAnswer(api, threadId, question, terminalOutput, stop.signal);
@@ -61,7 +64,12 @@ export async function ask(args: string[]): Promise<number> {
 
 export async function chat(args: string[]): Promise<number> {
   const api = await connect();
-  let threadId = args[0] ?? null;
+  let agentId: string | undefined;
+  let threadId: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--agent") agentId = args[++i];
+    else threadId = args[i] ?? null;
+  }
   if (threadId) {
     const detail = await api.getThread(threadId);
     process.stdout.write(dim(`Continuing "${detail.thread.title}"\n`));
@@ -90,7 +98,7 @@ export async function chat(args: string[]): Promise<number> {
         process.stdout.write(dim("Started a new chat.\n"));
         continue;
       }
-      threadId ??= (await api.createThread()).id;
+      threadId ??= (await api.createThread({ agentId })).id;
       current = new AbortController();
       try {
         finishAnswer(await streamAnswer(api, threadId, line, terminalOutput, current.signal));
@@ -147,4 +155,38 @@ export async function login(args: string[]): Promise<number> {
     stdio: ["inherit", "inherit", "inherit"],
   });
   return await proc.exited;
+}
+
+export async function apps(args: string[]): Promise<number> {
+  const showAll = args.includes("--all");
+  const { codexHome } = resolvePaths();
+  const adapter = new CodexAdapter({ codexHome });
+  process.stderr.write(dim("Asking ChatGPT for the apps on Staf's account. This can take a minute.\n"));
+  try {
+    let list: Awaited<ReturnType<CodexAdapter["listApps"]>>;
+    try {
+      list = await adapter.listApps();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new CliError(`Codex could not list the apps (${reason}). Try again in a moment.`);
+    }
+    const hidden = showAll ? 0 : list.filter((app) => !app.accessible).length;
+    if (!showAll) list = list.filter((app) => app.accessible);
+    if (list.length === 0) {
+      process.stdout.write("No apps are connected to Staf's ChatGPT account.\n");
+      return 0;
+    }
+    const width = Math.max(...list.map((app) => app.name.length));
+    for (const app of list) {
+      const note = app.accessible ? "" : dim("  (not connected)");
+      process.stdout.write(`${app.name.padEnd(width)}  ${dim(app.id)}${note}\n`);
+    }
+    if (hidden > 0) process.stdout.write(dim(`\n${hidden} apps in ChatGPT's directory are not connected. Run \`staf apps --all\` to see them.\n`));
+    process.stdout.write(
+      dim('\nTo let an agent use an app, add its name to "harnessApps" in the agent\'s agent.json.\n'),
+    );
+    return 0;
+  } finally {
+    await adapter.close();
+  }
 }

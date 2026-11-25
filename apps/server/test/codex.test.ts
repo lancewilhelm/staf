@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { activityFromItem, CodexAdapter } from "../src/harness/codex/adapter.ts";
+import { activityFromItem, CodexAdapter, codexThreadConfig } from "../src/harness/codex/adapter.ts";
 import type { HarnessEvent, TurnRequest } from "../src/harness/types.ts";
 
 const fixture = join(import.meta.dir, "fixtures", "fake-codex.ts");
@@ -35,6 +35,7 @@ function turn(overrides: Partial<TurnRequest> = {}) {
   const request: TurnRequest = {
     sessionId: null,
     cwd: "/tmp/agent",
+    access: { network: true, harnessApps: [], writableFolders: [] },
     instructions: "Be brief.",
     model: null,
     input: "What leads AP?",
@@ -68,8 +69,46 @@ describe("CodexAdapter", () => {
       sandbox: "workspace-write",
       approvalPolicy: "never",
       developerInstructions: "Be brief.",
-      config: { web_search: "live" },
+      config: {
+        web_search: "live",
+        features: { apps: false, plugins: false, computer_use: false, browser_use: false },
+        sandbox_workspace_write: { network_access: true, writable_roots: [] },
+      },
     });
+    expect(start.params.config.apps).toBeUndefined();
+  });
+
+  test("passes the same access settings when it resumes a thread", async () => {
+    const { adapter, requests } = setup();
+    const { request } = turn({
+      sessionId: "thread-saved",
+      access: { network: false, harnessApps: [], writableFolders: ["/srv/notes"] },
+    });
+    await adapter.runTurn(request);
+    const resume = requests().find((r) => r.method === "thread/resume")!;
+    expect(resume.params.config.sandbox_workspace_write).toEqual({
+      network_access: false,
+      writable_roots: ["/srv/notes"],
+    });
+  });
+
+  test("lists the account's apps and caches them for name lookups", async () => {
+    const { adapter, dir, requests } = setup();
+    const apps = await adapter.listApps();
+    expect(apps.map((app) => app.name)).toEqual(["Expedia", "Gmail"]);
+    expect(requests().find((r) => r.method === "app/list")!.params.threadId).toBe("thread-1");
+
+    // A later turn can name the app instead of using its ID.
+    const { request, events } = turn({ access: { network: true, harnessApps: ["expedia", "Hilton"], writableFolders: [] } });
+    await adapter.runTurn(request);
+    const start = requests().filter((r) => r.method === "thread/start").at(-1)!;
+    expect(start.params.config.apps).toEqual({
+      _default: { enabled: false, destructive_enabled: false },
+      connector_expedia: { enabled: true, destructive_enabled: false },
+    });
+    const skipped = events.find((e) => e.type === "activity" && e.activity.id === "app-missing-Hilton");
+    expect(skipped?.type === "activity" && skipped.activity.status).toBe("failed");
+    expect(JSON.parse(readFileSync(join(dir, "staf-apps.json"), "utf8"))).toHaveLength(2);
   });
 
   test("resumes a saved session instead of starting a new one", async () => {
@@ -121,6 +160,39 @@ describe("CodexAdapter", () => {
     const status = await adapter.status();
     // Without the codex command, or without a login, the harness is not ready.
     expect(status.ready).toBe(false);
+  });
+});
+
+describe("codexThreadConfig", () => {
+  const catalog = [
+    { id: "connector_gmail", name: "Gmail", accessible: true },
+    { id: "connector_expedia", name: "Expedia", accessible: true },
+  ];
+
+  test("turns account apps off unless an agent names them", () => {
+    const { config, unresolved } = codexThreadConfig(
+      { network: false, harnessApps: [], writableFolders: [] },
+      catalog,
+    );
+    expect(config.features).toMatchObject({ apps: false, computer_use: false, browser_use: false });
+    expect(config.apps).toBeUndefined();
+    expect(config.sandbox_workspace_write).toEqual({ network_access: false, writable_roots: [] });
+    expect(unresolved).toEqual([]);
+  });
+
+  test("allows named apps by name or ID, without destructive actions", () => {
+    const { config, unresolved } = codexThreadConfig(
+      { network: true, harnessApps: ["gmail", "connector_new_one", "Nope"], writableFolders: ["/srv/x"] },
+      catalog,
+    );
+    expect(config.features).toMatchObject({ apps: true });
+    expect(config.apps).toEqual({
+      _default: { enabled: false, destructive_enabled: false },
+      connector_gmail: { enabled: true, destructive_enabled: false },
+      connector_new_one: { enabled: true, destructive_enabled: false },
+    });
+    expect(unresolved).toEqual(["Nope"]);
+    expect(config.sandbox_workspace_write).toEqual({ network_access: true, writable_roots: ["/srv/x"] });
   });
 });
 

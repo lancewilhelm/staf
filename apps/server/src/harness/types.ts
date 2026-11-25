@@ -1,4 +1,5 @@
 import type { Activity, HarnessInfo } from "@staf/protocol";
+import type { AgentAccess } from "../agents.ts";
 
 /** Normalized events that every harness adapter emits while a turn runs. */
 export type HarnessEvent =
@@ -17,8 +18,10 @@ export type TurnOutcome =
 export interface TurnRequest {
   /** The harness session to continue, or null to start a new one. */
   sessionId: string | null;
-  /** The agent folder, used as the working directory. */
+  /** The agent's workspace, used as the working directory. */
   cwd: string;
+  /** What the agent may reach: network, harness apps, and extra writable folders. */
+  access: AgentAccess;
   /** Staf's instructions for this run, added to the harness's own. */
   instructions: string;
   /** Model to request, or null for the harness default. */

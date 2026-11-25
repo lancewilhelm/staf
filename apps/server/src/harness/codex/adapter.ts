@@ -1,6 +1,8 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Activity, HarnessInfo } from "@staf/protocol";
+import type { AgentAccess } from "../../agents.ts";
 import { VERSION } from "../../config.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest } from "../types.ts";
 import type {
@@ -37,6 +39,16 @@ interface ActiveTurn {
   finish: (outcome: TurnOutcome) => void;
 }
 
+/** One app that comes with the ChatGPT account, such as a connector. */
+export interface CodexApp {
+  id: string;
+  name: string;
+  /** Whether Codex reports the app as connected and usable. */
+  accessible: boolean;
+}
+
+/** Where `staf apps` caches the account's apps, so that turns can map names to IDs. */
+const APP_CATALOG = "staf-apps.json";
 const IDLE_MS = 10 * 60 * 1000;
 const MAX_DETAIL = 4000;
 
@@ -87,13 +99,29 @@ export class CodexAdapter implements HarnessAdapter {
     if (!ready.ready) return { status: "failed", error: ready.detail ?? "Codex is not ready." };
 
     const rpc = await this.connect();
+    const { config, unresolved } = codexThreadConfig(request.access, this.readAppCatalog());
+    for (const name of unresolved) {
+      const now = Date.now();
+      request.emit({
+        type: "activity",
+        activity: {
+          id: `app-missing-${name}`,
+          kind: "note",
+          title: `Skipped the app "${name}"`,
+          detail: `Staf could not find an app named "${name}" on this ChatGPT account. Run \`staf apps\` to list the apps and refresh Staf's list.`,
+          status: "failed",
+          startedAt: now,
+          completedAt: now,
+        },
+      });
+    }
     const threadOptions: ThreadOptions = {
       cwd: request.cwd,
       model: request.model,
       sandbox: "workspace-write",
       approvalPolicy: "never",
       developerInstructions: request.instructions,
-      config: { web_search: "live" },
+      config,
     };
 
     let threadId = request.sessionId;
@@ -162,6 +190,45 @@ export class CodexAdapter implements HarnessAdapter {
       turn.finish({ status: "failed", error: describe(error) });
     }
     return outcome;
+  }
+
+  /**
+   * Asks Codex for the apps that it knows about, and caches the connected ones for name
+   * lookups.
+   * Codex can take up to a minute to answer the first time.
+   */
+  async listApps(): Promise<CodexApp[]> {
+    const ready = await this.status();
+    if (!ready.ready) throw new Error(ready.detail ?? "Codex is not ready.");
+    const rpc = await this.connect();
+    // Listing apps for a thread is much faster than listing them without one.
+    const thread = await rpc.request<ThreadResponse>("thread/start", {
+      cwd: tmpdir(),
+      sandbox: "read-only",
+      approvalPolicy: "never",
+      ephemeral: true,
+    });
+    const apps: CodexApp[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { data: Array<{ id: string; name: string; isAccessible: boolean }>; nextCursor?: string | null } =
+        await rpc.request("app/list", { threadId: thread.thread.id, limit: 200, cursor });
+      for (const app of page.data) apps.push({ id: app.id, name: app.name, accessible: app.isAccessible });
+      // The list includes ChatGPT's whole app directory; most of it is not connected.
+      cursor = page.nextCursor ?? null;
+    } while (cursor);
+    apps.sort((a, b) => a.name.localeCompare(b.name));
+    const connected = apps.filter((app) => app.accessible);
+    writeFileSync(join(this.options.codexHome, APP_CATALOG), JSON.stringify(connected, null, 2) + "\n");
+    return apps;
+  }
+
+  private readAppCatalog(): CodexApp[] {
+    try {
+      return JSON.parse(readFileSync(join(this.options.codexHome, APP_CATALOG), "utf8")) as CodexApp[];
+    } catch {
+      return [];
+    }
   }
 
   private async connect(): Promise<RpcProcess> {
@@ -294,6 +361,47 @@ export class CodexAdapter implements HarnessAdapter {
   }
 }
 
+/**
+ * Turns an agent's access settings into Codex thread config. Account apps are off unless
+ * the agent names them, and the named ones cannot take destructive actions. Computer use,
+ * browser use, and Codex plugins are always off.
+ */
+export function codexThreadConfig(
+  access: AgentAccess,
+  catalog: CodexApp[],
+): { config: Record<string, unknown>; unresolved: string[] } {
+  const ids: string[] = [];
+  const unresolved: string[] = [];
+  for (const wanted of access.harnessApps) {
+    const byId = catalog.find((app) => app.id === wanted);
+    const byName = catalog.find((app) => app.name.toLowerCase() === wanted.toLowerCase());
+    const looksLikeId = /^(connector|asdk_app)_/.test(wanted);
+    const id = byId?.id ?? byName?.id ?? (looksLikeId ? wanted : null);
+    if (id) ids.push(id);
+    else unresolved.push(wanted);
+  }
+
+  const config: Record<string, unknown> = {
+    web_search: "live",
+    features: {
+      apps: ids.length > 0,
+      plugins: false,
+      computer_use: false,
+      browser_use: false,
+    },
+    sandbox_workspace_write: {
+      network_access: access.network,
+      writable_roots: access.writableFolders,
+    },
+  };
+  if (ids.length > 0) {
+    const apps: Record<string, unknown> = { _default: { enabled: false, destructive_enabled: false } };
+    for (const id of ids) apps[id] = { enabled: true, destructive_enabled: false };
+    config.apps = apps;
+  }
+  return { config, unresolved };
+}
+
 /** Maps a Codex thread item to a Staf activity, or null if it is not worth showing. */
 export function activityFromItem(item: ThreadItem, completed: boolean): Activity | null {
   const now = Date.now();
@@ -334,7 +442,8 @@ export function activityFromItem(item: ThreadItem, completed: boolean): Activity
       const activity: Activity = {
         ...base,
         kind: "tool",
-        title: `Used ${call.server} · ${call.tool}`,
+        // Account apps all arrive through Codex's "codex_apps" server, so name the tool instead.
+        title: call.server === "codex_apps" ? `Used ${call.tool}` : `Used ${call.server} · ${call.tool}`,
         status: completed ? (call.status === "failed" ? "failed" : "done") : "running",
       };
       if (call.error?.message) activity.detail = call.error.message;

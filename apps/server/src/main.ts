@@ -2,7 +2,7 @@
 import { mkdirSync } from "node:fs";
 import web from "../../web/index.html";
 import { createApp } from "./app.ts";
-import { ask, chat, CliError, login, status, threads } from "./cli/commands.ts";
+import { apps, ask, chat, CliError, login, status, threads } from "./cli/commands.ts";
 import { DEFAULT_HOST, resolvePaths, resolvePort, VERSION } from "./config.ts";
 
 const HELP = `Staf ${VERSION}: a personal agent host
@@ -10,10 +10,12 @@ const HELP = `Staf ${VERSION}: a personal agent host
 Usage:
   staf serve                 Run the host and the web app
   staf ask "question"        Ask one question and print the answer
-  staf chat [thread-id]      Chat in the terminal
+                             (--agent <id> picks an agent, --thread <id> continues a chat)
+  staf chat [thread-id]      Chat in the terminal (--agent <id> picks an agent)
   staf threads               List conversations
   staf status                Show whether the host and harnesses are ready
   staf login codex           Sign Staf in to ChatGPT through Codex
+  staf apps [--all]          List the ChatGPT apps that agents can be given
 
 Environment:
   STAF_HOME      Data folder (default ~/.staf)
@@ -63,6 +65,8 @@ async function main(argv: string[]): Promise<number> {
       return status();
     case "login":
       return login(args);
+    case "apps":
+      return apps(args);
     case "version":
     case "--version":
       process.stdout.write(`${VERSION}\n`);
