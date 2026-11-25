@@ -10,8 +10,11 @@ const HELP = `Staf ${VERSION}: a personal agent host
 Usage:
   staf serve                 Run the host and the web app
   staf ask "question"        Ask one question and print the answer
-                             (--agent <id> picks an agent, --thread <id> continues a chat)
-  staf chat [thread-id]      Chat in the terminal (--agent <id> picks an agent)
+                             --agent <id>     pick an agent
+                             --harness <id>   use another harness: codex, claude, antigravity
+                             --model <id>     use another model
+                             --thread <id>    continue a conversation
+  staf chat [thread-id]      Chat in the terminal (takes --agent, --harness, --model)
   staf threads               List conversations
   staf status                Show whether the host and harnesses are ready
   staf login codex           Sign Staf in to ChatGPT through Codex

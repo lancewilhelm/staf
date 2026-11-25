@@ -99,9 +99,24 @@ async function handle(message: any): Promise<void> {
     case "session/new": {
       const sessionId = `session-${++sessions}`;
       cwdBySession.set(sessionId, params.cwd);
-      send({ id, result: { sessionId } });
+      send({
+        id,
+        result: {
+          sessionId,
+          models: {
+            availableModels: [
+              { modelId: "gem-high", name: "Gem (High)" },
+              { modelId: "gem-low", name: "Gem (Low)" },
+            ],
+            currentModelId: "gem-high",
+          },
+        },
+      });
       return;
     }
+    case "session/close":
+      send({ id, result: {} });
+      return;
     case "session/load":
       if (scenario === "missing-session") {
         send({ id, error: { code: -32002, message: "Resource not found" } });

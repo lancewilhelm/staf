@@ -15,7 +15,8 @@ different folder, for example on a server's data disk.
 | `agents/<id>/AGENTS.md` | An agent's instructions | You |
 | `agents/<id>/workspace/` | Files that the agent creates: notes, scripts, skills, reports | The agent |
 | `harness/codex/` | Staf's own Codex sign-in, Codex's session logs, and the cached list of apps | Codex and Staf |
-| `harness/antigravity/` | Antigravity's settings and conversations for Staf runs | Antigravity |
+| `harness/antigravity/` | Antigravity's settings and conversations for Staf runs, and Staf's cached list of its models | Antigravity and Staf |
+| `trash/agents/` | Folders of deleted agents, with their workspaces. Delete them by hand when you no longer need them. | Staf |
 
 The harnesses keep their own transcript of each conversation. Treat these folders as
 private, like `staf.db`:
@@ -25,6 +26,10 @@ private, like `staf.db`:
 - Claude: **outside `STAF_HOME`**, in `~/.claude/projects/`, in a folder named after the
   agent's workspace path. Claude runs use your own Claude Code sign-in, which lives with
   your Claude Code settings.
+
+Deleting a conversation in Staf deletes the harness's copy too. If a harness cannot delete
+its copy, for example because Codex is signed out, Staf keeps the conversation and says
+why, so that you can try again.
 
 Apart from Claude's transcripts, nothing outside `STAF_HOME` is written, except folders
 that you list in an agent's `writableFolders` and the temporary folder that the harness
@@ -40,9 +45,12 @@ starting Staf.
 ## Running on your Mac today
 
 ```sh
-./dist/staf login codex
 ./dist/staf serve
 ```
+
+Sign Staf in to ChatGPT under **Settings → Providers** in the web app, or with
+`./dist/staf login codex`. The browser sign-in sends its answer to Codex on this computer,
+so do it in a browser on the same machine.
 
 Staf listens on `http://127.0.0.1:4280`. Only programs on the same machine can reach it,
 and it has no sign-in yet. It stops when you close the terminal.

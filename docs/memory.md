@@ -32,11 +32,14 @@ Each harness has its own memory feature. Those features belong to the harness ac
 data folder, not to a Staf agent, and Staf cannot see or scope them. Slice 1d turns them
 off:
 
-| Harness | Its memory feature | Change in slice 1d |
+| Harness | Its memory feature | Status |
 |---|---|---|
-| Codex | `memories` feature | Set it off explicitly (today it is off only by default). |
-| Claude | Auto-memory | None needed: `--safe-mode` already turns it off. |
-| Antigravity | Knowledge in `brain/` and `implicit/` | Turn it off. Today every Antigravity agent shares it through Staf's Antigravity folder. |
+| Codex | `memories` feature | Off: Staf sets it off on every thread. |
+| Claude | Auto-memory | Off: `--safe-mode` turns it off. |
+| Antigravity | Automatic knowledge in `implicit/` | **Cannot be turned off.** agy 1.5 controls it with a server-side flag, not a setting. It is shared by every conversation in Staf's Antigravity folder. `brain/` holds one folder per conversation and is deleted with the conversation. |
+
+The Antigravity gap matters once a second person has agents (slice 5). Before then, either give
+each person their own Antigravity folder or keep Antigravity for the account owner only.
 
 ## What the agent sees: two small blocks
 

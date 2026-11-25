@@ -125,11 +125,13 @@ describe("CodexAdapter", () => {
   });
 
   test("starts a new session when the saved one is gone", async () => {
-    const { adapter } = setup("missing-thread");
-    const { request, events } = turn({ sessionId: "thread-gone" });
+    const { adapter, requests } = setup("missing-thread");
+    const { request, events } = turn({ sessionId: "thread-gone", inputWithHistory: "HISTORY + What leads AP?" });
 
     expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
     expect(events[0]).toEqual({ type: "session", sessionId: "thread-1" });
+    // The new session gets the conversation so far.
+    expect(requests().find((r) => r.method === "turn/start")!.params.input[0].text).toBe("HISTORY + What leads AP?");
   });
 
   test("interrupts a turn when the signal aborts", async () => {
@@ -163,11 +165,47 @@ describe("CodexAdapter", () => {
   });
 });
 
+describe("CodexAdapter models, sign-in, and deletion", () => {
+  test("lists visible models and names the default when a thread asks for it", async () => {
+    const { adapter, requests } = setup();
+    expect(await adapter.listModels()).toEqual([
+      { id: "gpt-a", name: "GPT-A", isDefault: true },
+      { id: "gpt-b", name: "GPT-B" },
+    ]);
+    await adapter.runTurn(turn().request);
+    await adapter.runTurn(turn({ sessionId: "thread-1", model: "gpt-b" }).request);
+    const starts = requests().filter((r) => r.method === "turn/start");
+    expect(starts.map((r) => r.params.model)).toEqual(["gpt-a", "gpt-b"]);
+  });
+
+  test("deletes a thread, and treats a missing one as deleted", async () => {
+    const { adapter, requests } = setup();
+    await adapter.deleteSession("thread-7");
+    await adapter.deleteSession("thread-gone");
+    expect(requests().filter((r) => r.method === "thread/delete").map((r) => r.params.threadId)).toEqual([
+      "thread-7",
+      "thread-gone",
+    ]);
+  });
+
+  test("reports the signed-in account after it starts", async () => {
+    const { adapter } = setup();
+    await adapter.listModels();
+    await Bun.sleep(20);
+    expect(await adapter.status()).toMatchObject({ ready: true, signIn: "staf", account: "person@example.com" });
+  });
+});
+
 describe("codexThreadConfig", () => {
   const catalog = [
     { id: "connector_gmail", name: "Gmail", accessible: true },
     { id: "connector_expedia", name: "Expedia", accessible: true },
   ];
+
+  test("turns Codex's own memory and browser features off", () => {
+    const { config } = codexThreadConfig({ network: true, harnessApps: [], writableFolders: [] }, []);
+    expect(config.features).toMatchObject({ memories: false, browser_use: false, in_app_browser: false, computer_use: false });
+  });
 
   test("turns account apps off unless an agent names them", () => {
     const { config, unresolved } = codexThreadConfig(

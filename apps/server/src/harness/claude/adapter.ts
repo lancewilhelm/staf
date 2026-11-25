@@ -1,6 +1,9 @@
 // Claude through Claude Code's print mode with stream-JSON output, one process per turn.
 
-import type { Activity, HarnessInfo } from "@staf/protocol";
+import { existsSync, readdirSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import {
   AnswerText,
@@ -16,7 +19,21 @@ import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest } from "../
 export interface ClaudeOptions {
   /** Command that starts Claude Code. Tests replace it with a fake. */
   command?: string[];
+  /** Claude Code's data folder, where it keeps transcripts. Defaults to CLAUDE_CONFIG_DIR or ~/.claude. */
+  configDir?: string;
 }
+
+export const CLAUDE_NOTE =
+  "Uses this computer's Claude Code sign-in, and Claude Code keeps its own copy of each conversation in ~/.claude.";
+
+/** Claude Code accepts these aliases and maps them to the newest model of each family. */
+export const CLAUDE_MODELS: ModelInfo[] = [
+  { id: "opus", name: "Claude Opus" },
+  { id: "sonnet", name: "Claude Sonnet" },
+  { id: "haiku", name: "Claude Haiku" },
+];
+
+const SIGN_IN_TTL_MS = 60_000;
 
 /**
  * Built-in tools that Staf allows. Others are left out: cloud features of the Claude
@@ -78,16 +95,71 @@ interface ToolState {
 
 export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude";
-  readonly label = "Claude (Claude Code)";
+  readonly label = "Claude";
+  private signIn: { signedIn: boolean | undefined; at: number } | null = null;
 
   constructor(private readonly options: ClaudeOptions = {}) {}
 
   async status(): Promise<HarnessInfo> {
-    const base = { id: this.id, label: this.label };
+    const base: HarnessInfo = {
+      id: this.id,
+      label: this.label,
+      program: "Claude Code",
+      signIn: "machine",
+      note: CLAUDE_NOTE,
+      ready: true,
+    };
     if (!this.options.command && !Bun.which("claude")) {
       return { ...base, ready: false, detail: "The claude command is not installed." };
     }
-    return { ...base, ready: true };
+    const signedIn = this.options.command ? undefined : await this.checkSignIn();
+    if (signedIn === false) {
+      return { ...base, ready: false, signedIn, detail: "Not signed in. Run `claude` once in a terminal and sign in." };
+    }
+    return { ...base, ...(signedIn !== undefined ? { signedIn } : {}) };
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return CLAUDE_MODELS;
+  }
+
+  /** Deletes Claude Code's transcript of a session and the small files that it keeps beside it. */
+  async deleteSession(sessionId: string): Promise<void> {
+    if (!/^[A-Za-z0-9-]{8,80}$/.test(sessionId)) throw new Error(`"${sessionId}" is not a Claude session ID.`);
+    const root = this.options.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+    const projects = join(root, "projects");
+    if (existsSync(projects)) {
+      for (const project of readdirSync(projects)) {
+        rmSync(join(projects, project, `${sessionId}.jsonl`), { force: true });
+        rmSync(join(projects, project, sessionId), { recursive: true, force: true });
+      }
+    }
+    rmSync(join(root, "session-env", sessionId), { recursive: true, force: true });
+    rmSync(join(root, "file-history", sessionId), { recursive: true, force: true });
+    const todos = join(root, "todos");
+    if (existsSync(todos)) {
+      for (const name of readdirSync(todos)) {
+        if (name.startsWith(`${sessionId}-`)) rmSync(join(todos, name), { force: true });
+      }
+    }
+  }
+
+  /** Asks `claude auth status`, at most once a minute. Undefined means that Staf could not tell. */
+  private async checkSignIn(): Promise<boolean | undefined> {
+    if (this.signIn && Date.now() - this.signIn.at < SIGN_IN_TTL_MS) return this.signIn.signedIn;
+    let signedIn: boolean | undefined;
+    try {
+      const proc = Bun.spawn(["claude", "auth", "status"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const timer = setTimeout(() => proc.kill(), 5000);
+      const text = await new Response(proc.stdout).text();
+      clearTimeout(timer);
+      const parsed = JSON.parse(text) as { loggedIn?: unknown };
+      if (typeof parsed.loggedIn === "boolean") signedIn = parsed.loggedIn;
+    } catch {
+      signedIn = undefined;
+    }
+    this.signIn = { signedIn, at: Date.now() };
+    return signedIn;
   }
 
   async runTurn(request: TurnRequest): Promise<TurnOutcome> {
@@ -97,7 +169,8 @@ export class ClaudeAdapter implements HarnessAdapter {
       const first = await this.runOnce(request, request.sessionId);
       if (first.missingSession && request.sessionId) {
         // The saved session is gone. Continue in a new one.
-        return (await this.runOnce(request, null)).outcome;
+        const input = request.inputWithHistory ?? request.input;
+        return (await this.runOnce({ ...request, input }, null)).outcome;
       }
       return first.outcome;
     } catch (error) {

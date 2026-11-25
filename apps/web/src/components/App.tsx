@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { dismissError, openThread, useStore } from "../store.ts";
+import { dismissError, openSettings, openThread, useStore } from "../store.ts";
 import { ChatView } from "./ChatView.tsx";
 import { Icon } from "./Icon.tsx";
+import { Settings } from "./Settings.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 
 export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? null);
+  const settings = useStore((s) => s.settings);
 
   return (
     <div className="app">
@@ -25,6 +27,7 @@ export function App() {
         <Notices />
         <ChatView />
       </div>
+      {settings && <Settings view={settings} />}
     </div>
   );
 }
@@ -32,7 +35,13 @@ export function App() {
 function Notices() {
   const connection = useStore((s) => s.connection);
   const error = useStore((s) => s.error);
-  const blocked = useStore((s) => s.health?.harnesses.find((h) => !h.ready) ?? null);
+  // Only the harness that the next answer uses matters here; the others show in Settings.
+  const blocked = useStore((s) => {
+    const thread = s.threads.find((t) => t.id === s.threadId);
+    const agent = s.agents.find((a) => a.id === (thread?.agentId ?? s.agentId));
+    const id = thread?.harness ?? s.draft.harness ?? agent?.harness;
+    return s.health?.harnesses.find((h) => h.id === id && !h.ready) ?? null;
+  });
 
   return (
     <div className="notices">
@@ -43,7 +52,12 @@ function Notices() {
             <Icon name="alert" size={16} />
             <span>{blocked.label} isn't connected yet.</span>
           </summary>
-          <p>{blocked.detail}</p>
+          <p>
+            {blocked.detail}{" "}
+            <button type="button" className="link" onClick={() => openSettings({ section: "providers" })}>
+              Open settings
+            </button>
+          </p>
         </details>
       )}
       {error && (

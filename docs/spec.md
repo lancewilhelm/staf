@@ -161,7 +161,7 @@ Each slice is used live before the next one starts.
    - 1a: web chat and CLI on Codex, with streaming answers and collapsible activity. Done.
    - 1b: Antigravity through a generic ACP adapter. Done.
    - 1c: Claude through stream-JSON mode. Done.
-   - 1d: agents, settings, and cleanup. Next.
+   - 1d: agents, settings, and cleanup. Done.
      - **Agents are profiles.** An agent is a named assistant with its own
        instructions, workspace, and memory, and a default provider and model. For
        example, "Staf" for everyday questions and "Paper" for the newspaper.
@@ -221,7 +221,14 @@ plugins.
   the file limits.
 - Every harness keeps its own transcript of each conversation, so conversations are
   stored twice. Claude's transcripts are in `~/.claude/projects/`, outside Staf's data
-  folder. Until slice 1d, deleting a conversation in Staf leaves the harness's copy.
+  folder. Deleting a conversation in Staf deletes the harness's copy as well.
+- Antigravity's automatic knowledge (`implicit/`) cannot be turned off, and every
+  Antigravity conversation in Staf shares it. See [memory.md](memory.md).
+- Staf's API has no sign-in, and commands that an agent runs can reach it. The API
+  therefore cannot change an agent's access settings, but it can change instructions and
+  start conversations with other agents. Slice 6's sign-in closes this.
+- Signing in to ChatGPT from the web app works only in a browser on the same computer,
+  because Codex receives the answer on a local port.
 - How Antigravity and Claude sign in on a headless Linux server is untested.
 
 - Codex sometimes runs commands through its `exec` tool ("code mode"), which runs a

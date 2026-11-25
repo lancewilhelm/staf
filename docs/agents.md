@@ -31,8 +31,8 @@ defaults shown.
 | Field | Default | Meaning |
 |---|---|---|
 | `name` | `"Staf"` | The name shown for the agent. |
-| `harness` | `"codex"` | Which harness runs the agent: `codex`, `antigravity`, or `claude`. See below. |
-| `model` | `null` | A model to request, such as `"gemini-4-neon-low"` or `"claude-sonnet-5-5"`, or `null` for the harness default. |
+| `harness` | `"codex"` | The default harness for new conversations: `codex`, `antigravity`, or `claude`. See below. |
+| `model` | `null` | The default model, such as `"gpt-6.2-sol"`, `"sonnet"`, or `"gemini-4-neon-low"`, or `null` for the harness's default. |
 | `network` | `true` | Whether commands that the agent runs can reach the network. Web search works either way. |
 | `harnessApps` | `[]` | Apps that come with the harness account, by name or ID. See below. |
 | `writableFolders` | `[]` | Extra folders that the agent may write to, as absolute paths or paths starting with `~/`. |
@@ -129,9 +129,18 @@ A Gemini agent that uses a faster model:
 }
 ```
 
-## Creating an agent
+## Creating and editing agents
 
-There is no screen for this yet. Create the folder by hand:
+Open **Settings → Agents** in the web app. There you can create an agent, and change an
+agent's name, default provider, default model, and instructions. Staf names the folder
+after the agent, for example `morning-paper` for "Morning Paper".
+
+**Access settings** (`network`, `writableFolders`, and `harnessApps`) are shown there but
+can only be changed in `agent.json`. Staf's web API has no sign-in yet, so a command that
+an agent runs could call it. If the API could change access, a prompt injection could make
+an agent widen its own access.
+
+You can also create an agent by hand:
 
 ```sh
 mkdir -p ~/.staf/agents/travel
@@ -140,10 +149,38 @@ echo "You help plan trips. Prefer refundable options." > ~/.staf/agents/travel/A
 staf ask --agent travel "Find a hotel in Lisbon for December 12."
 ```
 
-In the web app, new agents appear as choices under the box on the new-chat screen.
-
 Staf creates the `workspace/` folder the first time the agent runs. Changes to
 `agent.json` and `AGENTS.md` apply to the next message; you do not need to restart Staf.
+
+**Deleting an agent** deletes its conversations, including the harnesses' copies, and
+moves its folder, with its workspace, to `~/.staf/trash/agents/`. The default agent cannot
+be deleted.
+
+## Choosing the provider and model for one conversation
+
+The pill under the message box shows the agent, and the model or provider, such as
+"Staf · ChatGPT". Its menu picks:
+
+- **The agent,** for a new chat.
+- **The provider and model,** for this conversation. A new chat starts with the agent's
+  defaults.
+
+During a conversation:
+
+- **Another model on the same provider** applies from the next message.
+- **Another provider** starts a new session on that provider. Staf passes it the earlier
+  questions and answers as text, but not the details of earlier steps, such as command
+  output. A divider in the conversation marks the switch.
+
+In the terminal, `staf ask` and `staf chat` take `--harness` and `--model`:
+
+```sh
+staf ask --harness claude --model haiku "Summarize today's weather in Lisbon."
+staf ask --thread <id> --model gpt-6.2-astra "Now in two sentences."
+```
+
+Model IDs come from each harness. Settings lists them; Claude accepts the aliases `opus`,
+`sonnet`, and `haiku`.
 
 ## What Staf adds to the instructions
 

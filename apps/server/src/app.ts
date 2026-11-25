@@ -46,7 +46,10 @@ export function createApp(options: AppOptions): App {
   const list =
     options.harnesses ??
     [
-      new CodexAdapter({ codexHome: paths.codexHome }),
+      new CodexAdapter({
+        codexHome: paths.codexHome,
+        onStatusChange: () => bus.publish({ type: "harnesses.changed" }),
+      }),
       antigravityAdapter({ home: paths.antigravityHome }),
       new ClaudeAdapter(),
       ...(options.harnessOverride === "fake" ? [new FakeHarness({ delayMs: 40 })] : []),

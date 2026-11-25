@@ -1,4 +1,4 @@
-import type { HarnessInfo } from "@staf/protocol";
+import type { HarnessInfo, ModelInfo } from "@staf/protocol";
 import type { HarnessAdapter, TurnOutcome, TurnRequest } from "./types.ts";
 
 /**
@@ -6,14 +6,32 @@ import type { HarnessAdapter, TurnOutcome, TurnRequest } from "./types.ts";
  * uses it for offline work on the web app.
  */
 export class FakeHarness implements HarnessAdapter {
-  readonly id = "fake";
-  readonly label = "Fake harness";
+  readonly id: string;
+  readonly label: string;
   readonly requests: TurnRequest[] = [];
+  /** Sessions that Staf asked this harness to delete. */
+  readonly deleted: string[] = [];
 
-  constructor(private readonly options: { delayMs?: number; fail?: string; commentary?: boolean } = {}) {}
+  constructor(
+    private readonly options: { id?: string; delayMs?: number; fail?: string; commentary?: boolean } = {},
+  ) {
+    this.id = options.id ?? "fake";
+    this.label = options.id ? `Fake ${options.id}` : "Fake harness";
+  }
 
   async status(): Promise<HarnessInfo> {
-    return { id: this.id, label: this.label, ready: true };
+    return { id: this.id, label: this.label, program: "Fake", signIn: "machine", ready: true };
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return [
+      { id: "fake-small", name: "Fake Small", isDefault: true },
+      { id: "fake-large", name: "Fake Large" },
+    ];
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    this.deleted.push(sessionId);
   }
 
   async runTurn(request: TurnRequest): Promise<TurnOutcome> {

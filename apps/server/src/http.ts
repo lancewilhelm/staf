@@ -1,9 +1,18 @@
-import type { HealthInfo, StreamEvent } from "@staf/protocol";
+import type { AgentSummary, HealthInfo, StreamEvent } from "@staf/protocol";
 import type { HTMLBundle, Server } from "bun";
-import type { Agents } from "./agents.ts";
+import {
+  type Agent,
+  AgentConfigError,
+  type AgentEdit,
+  AgentInputError,
+  AgentNotFoundError,
+  type Agents,
+  DEFAULT_AGENT_ID,
+} from "./agents.ts";
 import type { EventBus } from "./bus.ts";
 import { ChatError, type ChatService } from "./chat.ts";
 import { VERSION } from "./config.ts";
+import { CodexAdapter } from "./harness/codex/adapter.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
 
 export interface HttpOptions {
@@ -32,6 +41,10 @@ export function startHttp(options: HttpOptions): Server<undefined> {
         return await handler(req, server);
       } catch (error) {
         if (error instanceof ChatError) return json({ error: error.message }, error.status);
+        if (error instanceof AgentNotFoundError) return json({ error: error.message }, 404);
+        if (error instanceof AgentInputError || error instanceof AgentConfigError) {
+          return json({ error: error.message }, 400);
+        }
         if (error instanceof SyntaxError) return json({ error: "The request body is not valid JSON." }, 400);
         console.error(error);
         return json({ error: "Something went wrong in Staf." }, 500);
@@ -49,27 +62,82 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       }),
     },
     "/api/agents": {
-      GET: api(() =>
-        json(
-          options.agents.list().map((agent) => ({
-            id: agent.id,
-            name: agent.name,
-            harness: agent.harness,
-            harnessLabel: options.harnesses.get(agent.harness)?.label ?? agent.harness,
-          })),
-        ),
-      ),
+      GET: api(() => json(options.agents.list().map(summary))),
+      POST: api(async (req) => {
+        const edit = readAgentEdit(await readJson(req));
+        if (edit.name === undefined || edit.harness === undefined) {
+          throw new ChatError(400, "Give the agent a name and a harness.");
+        }
+        const agent = options.agents.create({
+          name: edit.name,
+          harness: edit.harness,
+          model: edit.model ?? null,
+          instructions: edit.instructions ?? "",
+        });
+        bus.publish({ type: "agents.changed" });
+        return json(summary(agent), 201);
+      }),
+    },
+    "/api/agents/:id": {
+      GET: api((req) => {
+        const agent = options.agents.get(req.params.id!);
+        if (!agent) throw new AgentNotFoundError(req.params.id!);
+        return json(summary(agent));
+      }),
+      PATCH: api(async (req) => {
+        const agent = options.agents.update(req.params.id!, readAgentEdit(await readJson(req)));
+        bus.publish({ type: "agents.changed" });
+        return json(summary(agent));
+      }),
+      DELETE: api(async (req) => {
+        const id = req.params.id!;
+        if (id === DEFAULT_AGENT_ID) throw new ChatError(400, "The default agent cannot be deleted.");
+        if (!options.agents.get(id)) throw new AgentNotFoundError(id);
+        await chat.deleteThreadsOf(id);
+        options.agents.remove(id);
+        bus.publish({ type: "agents.changed" });
+        return new Response(null, { status: 204 });
+      }),
+    },
+    "/api/harnesses/:id/models": {
+      GET: api(async (req) => {
+        const harness = options.harnesses.get(req.params.id!);
+        if (!harness) throw new ChatError(404, `Staf has no harness named "${req.params.id}".`);
+        try {
+          return json(await harness.listModels());
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new ChatError(502, `${harness.label} could not list its models. ${reason}`);
+        }
+      }),
+    },
+    "/api/harnesses/:id/login": {
+      POST: api(async (req) => {
+        const harness = options.harnesses.get(req.params.id!);
+        if (!(harness instanceof CodexAdapter)) {
+          throw new ChatError(400, "Only ChatGPT signs in through Staf. The other harnesses use this computer's sign-in.");
+        }
+        return json(await harness.startLogin());
+      }),
     },
     "/api/threads": {
       GET: api(() => json(chat.listThreads())),
       POST: api(async (req) => {
-        const body = (await readJson(req)) as { agentId?: unknown };
+        const body = await readJson(req);
         const agentId = typeof body.agentId === "string" ? body.agentId : undefined;
-        return json(chat.createThread(agentId), 201);
+        const harness = typeof body.harness === "string" ? body.harness : undefined;
+        const model = readModel(body.model);
+        return json(chat.createThread(agentId, { harness, ...(model !== undefined ? { model } : {}) }), 201);
       }),
     },
     "/api/threads/:id": {
       GET: api((req) => json(chat.getThread(req.params.id!))),
+      PATCH: api(async (req) => {
+        const body = await readJson(req);
+        const harness = typeof body.harness === "string" ? body.harness : undefined;
+        const model = readModel(body.model);
+        return json(chat.updateThread(req.params.id!, { harness, ...(model !== undefined ? { model } : {}) }));
+      }),
       DELETE: api(async (req) => {
         await chat.deleteThread(req.params.id!);
         return new Response(null, { status: 204 });
@@ -94,6 +162,41 @@ export function startHttp(options: HttpOptions): Server<undefined> {
     "/api/*": api(() => json({ error: "There is no such API route." }, 404)),
   };
   if (options.web) routes["/*"] = options.web;
+
+  function summary(agent: Agent): AgentSummary {
+    return {
+      id: agent.id,
+      name: agent.name,
+      harness: agent.harness,
+      harnessLabel: options.harnesses.get(agent.harness)?.label ?? agent.harness,
+      model: agent.model,
+      instructions: agent.instructions,
+      network: agent.access.network,
+      writableFolders: agent.access.writableFolders,
+      harnessApps: agent.access.harnessApps,
+      isDefault: agent.id === DEFAULT_AGENT_ID,
+    };
+  }
+
+  function readAgentEdit(body: Record<string, unknown>): AgentEdit {
+    const edit: AgentEdit = {};
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string") throw new ChatError(400, "The name must be text.");
+      edit.name = body.name;
+    }
+    if (body.harness !== undefined) {
+      if (typeof body.harness !== "string") throw new ChatError(400, "The harness must be text.");
+      chat.checkHarness(body.harness, null);
+      edit.harness = body.harness;
+    }
+    const model = readModel(body.model);
+    if (model !== undefined) edit.model = model;
+    if (body.instructions !== undefined) {
+      if (typeof body.instructions !== "string") throw new ChatError(400, "The instructions must be text.");
+      edit.instructions = body.instructions;
+    }
+    return edit;
+  }
 
   return Bun.serve({
     hostname: options.hostname,
@@ -161,6 +264,14 @@ function eventStream(req: Request, server: Server<undefined>, bus: EventBus): Re
       connection: "keep-alive",
     },
   });
+}
+
+/** Reads an optional model field: a model ID, null for the harness's default, or undefined. */
+function readModel(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  throw new ChatError(400, "The model must be a model ID or null.");
 }
 
 async function readJson(req: Request): Promise<Record<string, unknown>> {

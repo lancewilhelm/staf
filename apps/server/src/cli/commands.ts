@@ -40,20 +40,36 @@ function finishAnswer(message: Message): void {
   if (message.status === "interrupted") process.stderr.write(dim("Stopped.\n"));
 }
 
+/** Reads --agent, --harness, and --model, which choose who answers a new conversation. */
+function readChoice(args: string[], i: number, choice: { agentId?: string; harness?: string; model?: string }): number {
+  const flag = args[i];
+  if (flag === "--agent") choice.agentId = args[++i];
+  else if (flag === "--harness") choice.harness = args[++i];
+  else if (flag === "--model") choice.model = args[++i];
+  else return -1;
+  return i;
+}
+
 export async function ask(args: string[]): Promise<number> {
   let threadId: string | null = null;
-  let agentId: string | undefined;
+  const choice: { agentId?: string; harness?: string; model?: string } = {};
   const words: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--thread") threadId = args[++i] ?? null;
-    else if (args[i] === "--agent") agentId = args[++i];
-    else words.push(args[i]!);
+    else {
+      const next = readChoice(args, i, choice);
+      if (next >= 0) i = next;
+      else words.push(args[i]!);
+    }
   }
   const question = words.join(" ").trim() || (process.stdin.isTTY ? "" : await Bun.stdin.text());
   if (!question.trim()) throw new CliError('Ask a question, for example: staf ask "Is it going to rain today?"');
 
   const api = await connect();
-  threadId ??= (await api.createThread({ agentId })).id;
+  if (threadId && (choice.harness || choice.model)) {
+    await api.updateThread(threadId, { ...(choice.harness ? { harness: choice.harness } : {}), ...(choice.model ? { model: choice.model } : {}) });
+  }
+  threadId ??= (await api.createThread(choice)).id;
   const stop = new AbortController();
   process.once("SIGINT", () => stop.abort());
   const message = await streamAnswer(api, threadId, question, terminalOutput, stop.signal);
@@ -64,10 +80,11 @@ export async function ask(args: string[]): Promise<number> {
 
 export async function chat(args: string[]): Promise<number> {
   const api = await connect();
-  let agentId: string | undefined;
+  const choice: { agentId?: string; harness?: string; model?: string } = {};
   let threadId: string | null = null;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--agent") agentId = args[++i];
+    const next = readChoice(args, i, choice);
+    if (next >= 0) i = next;
     else threadId = args[i] ?? null;
   }
   if (threadId) {
@@ -98,7 +115,7 @@ export async function chat(args: string[]): Promise<number> {
         process.stdout.write(dim("Started a new chat.\n"));
         continue;
       }
-      threadId ??= (await api.createThread({ agentId })).id;
+      threadId ??= (await api.createThread(choice)).id;
       current = new AbortController();
       try {
         finishAnswer(await streamAnswer(api, threadId, line, terminalOutput, current.signal));
@@ -135,7 +152,9 @@ export async function status(): Promise<number> {
     process.stdout.write(`Staf ${health.version} is running at ${api.baseUrl}\n`);
     for (const harness of health.harnesses) {
       const state = harness.ready ? "ready" : `not ready: ${harness.detail ?? "unknown reason"}`;
-      process.stdout.write(`  ${harness.label}: ${state}\n`);
+      const tag = harness.experimental ? " (experimental)" : "";
+      process.stdout.write(`  ${harness.label} via ${harness.program}${tag}: ${state}\n`);
+      if (harness.note) process.stdout.write(dim(`    ${harness.note}\n`));
     }
     return 0;
   } catch {

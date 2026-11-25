@@ -8,13 +8,14 @@ import type {
   ThreadSummary,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 interface ThreadRow {
   id: string;
   title: string;
   agent_id: string;
   harness: string;
+  model: string | null;
   session_id: string | null;
   status: ThreadStatus;
   created_at: number;
@@ -29,8 +30,17 @@ interface MessageRow {
   activities: string;
   status: MessageStatus;
   error: string | null;
+  harness: string | null;
+  model: string | null;
   created_at: number;
   completed_at: number | null;
+}
+
+/** A harness session that a thread has used. A thread gets a new one when its harness changes. */
+export interface HarnessSession {
+  harness: string;
+  sessionId: string;
+  threadId: string;
 }
 
 export interface StoredThread extends ThreadSummary {
@@ -65,6 +75,36 @@ export class Store {
       user_version: number;
     };
     if (version >= SCHEMA_VERSION) return;
+    if (version < 1) this.createV1();
+    if (version < 2) this.migrateToV2();
+  }
+
+  private migrateToV2(): void {
+    this.db.transaction(() => {
+      this.db.run("ALTER TABLE threads ADD COLUMN model TEXT");
+      this.db.run("ALTER TABLE messages ADD COLUMN harness TEXT");
+      this.db.run("ALTER TABLE messages ADD COLUMN model TEXT");
+      this.db.run(`
+        CREATE TABLE harness_sessions (
+          harness TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (harness, session_id)
+        )`);
+      this.db.run("CREATE INDEX harness_sessions_by_thread ON harness_sessions(thread_id)");
+      this.db.run(`
+        INSERT INTO harness_sessions (harness, session_id, thread_id, created_at)
+        SELECT harness, session_id, id, created_at FROM threads WHERE session_id IS NOT NULL`);
+      // Answers written before version 2 came from the thread's only harness.
+      this.db.run(`
+        UPDATE messages SET harness = (SELECT harness FROM threads WHERE threads.id = messages.thread_id)
+        WHERE role = 'assistant'`);
+      this.db.run("PRAGMA user_version = 2");
+    })();
+  }
+
+  private createV1(): void {
     this.db.transaction(() => {
       this.db.run(`
         CREATE TABLE threads (
@@ -90,7 +130,7 @@ export class Store {
           completed_at INTEGER
         )`);
       this.db.run("CREATE INDEX messages_by_thread ON messages(thread_id, created_at)");
-      this.db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      this.db.run("PRAGMA user_version = 1");
     })();
   }
 
@@ -110,13 +150,14 @@ export class Store {
     return changed.changes;
   }
 
-  createThread(input: { title: string; agentId: string; harness: string }): StoredThread {
+  createThread(input: { title: string; agentId: string; harness: string; model: string | null }): StoredThread {
     const now = Date.now();
     const thread: StoredThread = {
       id: crypto.randomUUID(),
       title: input.title,
       agentId: input.agentId,
       harness: input.harness,
+      model: input.model,
       sessionId: null,
       status: "idle",
       createdAt: now,
@@ -124,14 +165,15 @@ export class Store {
     };
     this.db
       .query(
-        `INSERT INTO threads (id, title, agent_id, harness, session_id, status, created_at, updated_at)
-         VALUES ($id, $title, $agentId, $harness, NULL, $status, $createdAt, $updatedAt)`,
+        `INSERT INTO threads (id, title, agent_id, harness, model, session_id, status, created_at, updated_at)
+         VALUES ($id, $title, $agentId, $harness, $model, NULL, $status, $createdAt, $updatedAt)`,
       )
       .run({
         id: thread.id,
         title: thread.title,
         agentId: thread.agentId,
         harness: thread.harness,
+        model: thread.model,
         status: thread.status,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
@@ -155,30 +197,63 @@ export class Store {
 
   updateThread(
     id: string,
-    patch: { title?: string; sessionId?: string | null; status?: ThreadStatus; touch?: boolean },
+    patch: {
+      title?: string;
+      harness?: string;
+      model?: string | null;
+      sessionId?: string | null;
+      status?: ThreadStatus;
+      touch?: boolean;
+    },
   ): StoredThread | null {
     const current = this.getThread(id);
     if (!current) return null;
     const next: StoredThread = {
       ...current,
       title: patch.title ?? current.title,
+      harness: patch.harness ?? current.harness,
+      model: patch.model === undefined ? current.model : patch.model,
       sessionId: patch.sessionId === undefined ? current.sessionId : patch.sessionId,
       status: patch.status ?? current.status,
       updatedAt: patch.touch ? Date.now() : current.updatedAt,
     };
     this.db
       .query(
-        `UPDATE threads SET title = $title, session_id = $sessionId, status = $status,
-           updated_at = $updatedAt WHERE id = $id`,
+        `UPDATE threads SET title = $title, harness = $harness, model = $model, session_id = $sessionId,
+           status = $status, updated_at = $updatedAt WHERE id = $id`,
       )
       .run({
         id,
         title: next.title,
+        harness: next.harness,
+        model: next.model,
         sessionId: next.sessionId,
         status: next.status,
         updatedAt: next.updatedAt,
       });
     return next;
+  }
+
+  /** Records a harness session that a thread started. */
+  addSession(input: HarnessSession): void {
+    this.db
+      .query(
+        `INSERT OR IGNORE INTO harness_sessions (harness, session_id, thread_id, created_at)
+         VALUES ($harness, $sessionId, $threadId, $createdAt)`,
+      )
+      .run({ ...input, createdAt: Date.now() });
+  }
+
+  listSessions(threadId: string): HarnessSession[] {
+    return (
+      this.db
+        .query("SELECT harness, session_id, thread_id FROM harness_sessions WHERE thread_id = $threadId ORDER BY created_at")
+        .all({ threadId }) as Array<{ harness: string; session_id: string; thread_id: string }>
+    ).map((row) => ({ harness: row.harness, sessionId: row.session_id, threadId: row.thread_id }));
+  }
+
+  listThreadsForAgent(agentId: string): StoredThread[] {
+    return (this.db.query("SELECT * FROM threads WHERE agent_id = $agentId").all({ agentId }) as ThreadRow[]).map(toThread);
   }
 
   deleteThread(id: string): boolean {
@@ -190,6 +265,8 @@ export class Store {
     role: MessageRole;
     text: string;
     status: MessageStatus;
+    harness?: string;
+    model?: string | null;
   }): Message {
     const message: Message = {
       id: crypto.randomUUID(),
@@ -198,13 +275,14 @@ export class Store {
       text: input.text,
       activities: [],
       status: input.status,
+      ...(input.harness ? { harness: input.harness, model: input.model ?? null } : {}),
       createdAt: Date.now(),
     };
     if (message.status !== "streaming") message.completedAt = message.createdAt;
     this.db
       .query(
-        `INSERT INTO messages (id, thread_id, role, text, activities, status, error, created_at, completed_at)
-         VALUES ($id, $threadId, $role, $text, '[]', $status, NULL, $createdAt, $completedAt)`,
+        `INSERT INTO messages (id, thread_id, role, text, activities, status, error, harness, model, created_at, completed_at)
+         VALUES ($id, $threadId, $role, $text, '[]', $status, NULL, $harness, $model, $createdAt, $completedAt)`,
       )
       .run({
         id: message.id,
@@ -212,6 +290,8 @@ export class Store {
         role: message.role,
         text: message.text,
         status: message.status,
+        harness: message.harness ?? null,
+        model: message.model ?? null,
         createdAt: message.createdAt,
         completedAt: message.completedAt ?? null,
       });
@@ -271,6 +351,7 @@ function toThread(row: ThreadRow): StoredThread {
     title: row.title,
     agentId: row.agent_id,
     harness: row.harness,
+    model: row.model,
     sessionId: row.session_id,
     status: row.status,
     createdAt: row.created_at,
@@ -288,6 +369,10 @@ function toMessage(row: MessageRow): Message {
     status: row.status,
     createdAt: row.created_at,
   };
+  if (row.harness !== null) {
+    message.harness = row.harness;
+    message.model = row.model;
+  }
   if (row.error !== null) message.error = row.error;
   if (row.completed_at !== null) message.completedAt = row.completed_at;
   return message;

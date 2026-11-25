@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Activity, HarnessInfo } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import { VERSION } from "../../config.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest } from "../types.ts";
@@ -25,6 +25,8 @@ export interface CodexOptions {
   command?: string[];
   /** Stop the app server after this long without a turn. */
   idleMs?: number;
+  /** Called when the sign-in changes, for example after a sign-in in the browser. */
+  onStatusChange?: () => void;
 }
 
 interface ActiveTurn {
@@ -51,10 +53,13 @@ export interface CodexApp {
 /** Where `staf apps` caches the account's apps, so that turns can map names to IDs. */
 const APP_CATALOG = "staf-apps.json";
 const IDLE_MS = 10 * 60 * 1000;
+const MODELS_TTL_MS = 10 * 60 * 1000;
+
+export const CODEX_NOTE = "Uses Staf's own ChatGPT sign-in. Account apps such as Gmail stay off unless an agent allows them.";
 
 export class CodexAdapter implements HarnessAdapter {
   readonly id = "codex";
-  readonly label = "ChatGPT (Codex)";
+  readonly label = "ChatGPT";
 
   private rpc: RpcProcess | null = null;
   private starting: Promise<RpcProcess> | null = null;
@@ -62,18 +67,84 @@ export class CodexAdapter implements HarnessAdapter {
   private readonly loaded = new Set<string>();
   private readonly turns = new Map<string, ActiveTurn>();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private models: { list: ModelInfo[]; at: number } | null = null;
+  /** The signed-in account, read after the app server starts. */
+  private account: string | null = null;
 
   constructor(private readonly options: CodexOptions) {}
 
   async status(): Promise<HarnessInfo> {
-    const base = { id: this.id, label: this.label };
+    const base: HarnessInfo = {
+      id: this.id,
+      label: this.label,
+      program: "Codex",
+      signIn: "staf",
+      note: CODEX_NOTE,
+      ready: true,
+    };
     if (!this.options.command && !Bun.which("codex")) {
       return { ...base, ready: false, detail: "The codex command is not installed." };
     }
     if (!this.options.command && !existsSync(join(this.options.codexHome, "auth.json"))) {
-      return { ...base, ready: false, detail: "Not signed in. Run `staf login codex`." };
+      return { ...base, ready: false, signedIn: false, detail: "Not signed in. Sign in under Settings → Providers, or run `staf login codex`." };
     }
-    return { ...base, ready: true };
+    return { ...base, signedIn: true, ...(this.account ? { account: this.account } : {}) };
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    if (this.models && Date.now() - this.models.at < MODELS_TTL_MS) return this.models.list;
+    const ready = await this.status();
+    if (!ready.ready) throw new Error(ready.detail ?? "Codex is not ready.");
+    const rpc = await this.connect();
+    const list: ModelInfo[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { data: Array<{ id: string; displayName: string; hidden: boolean; isDefault: boolean }>; nextCursor: string | null } =
+        await rpc.request("model/list", { cursor, limit: 100 });
+      for (const model of page.data) {
+        if (model.hidden) continue;
+        list.push({ id: model.id, name: model.displayName, ...(model.isDefault ? { isDefault: true } : {}) });
+      }
+      cursor = page.nextCursor;
+    } while (cursor);
+    this.models = { list, at: Date.now() };
+    this.startIdleTimerIfIdle();
+    return list;
+  }
+
+  private async defaultModel(): Promise<string | null> {
+    try {
+      return (await this.listModels()).find((model) => model.isDefault)?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const ready = await this.status();
+    if (!ready.ready) throw new Error(ready.detail ?? "Codex is not ready.");
+    const rpc = await this.connect();
+    try {
+      await rpc.request("thread/delete", { threadId: sessionId });
+    } catch (error) {
+      // A thread that Codex no longer has is already gone.
+      if (!(error instanceof RpcError) || !/not found|no thread|unknown thread/i.test(error.message)) throw error;
+    } finally {
+      this.loaded.delete(sessionId);
+      this.startIdleTimerIfIdle();
+    }
+  }
+
+  /**
+   * Starts a ChatGPT sign-in for Staf's Codex home and returns the page to open. Codex
+   * listens for the browser's answer on this computer, so the browser must run here too.
+   */
+  async startLogin(): Promise<{ url: string }> {
+    if (!this.options.command && !Bun.which("codex")) throw new Error("The codex command is not installed.");
+    const rpc = await this.connect();
+    const started = await rpc.request<{ type: string; authUrl?: string }>("account/login/start", { type: "chatgpt" });
+    if (!started.authUrl) throw new Error("Codex did not return a sign-in page.");
+    return { url: started.authUrl };
   }
 
   async runTurn(request: TurnRequest): Promise<TurnOutcome> {
@@ -125,6 +196,7 @@ export class CodexAdapter implements HarnessAdapter {
     };
 
     let threadId = request.sessionId;
+    let input = request.input;
     if (threadId && !this.loaded.has(threadId)) {
       try {
         await rpc.request<ThreadResponse>("thread/resume", {
@@ -133,9 +205,10 @@ export class CodexAdapter implements HarnessAdapter {
           excludeTurns: true,
         });
       } catch (error) {
-        // The saved Codex thread is gone. Continue in a new one.
+        // The saved Codex thread is gone. Continue in a new one that gets the conversation so far.
         if (!(error instanceof RpcError)) throw error;
         threadId = null;
+        input = request.inputWithHistory ?? request.input;
       }
     }
     if (!threadId) {
@@ -178,9 +251,13 @@ export class CodexAdapter implements HarnessAdapter {
 
     const turn = this.turns.get(threadId)!;
     try {
+      // The model applies to this turn and later ones, so a change takes effect at once. A
+      // thread that asks for the default gets it named, in case it used another model before.
+      const model = request.model ?? (await this.defaultModel());
       const started = await rpc.request<TurnStartResponse>("turn/start", {
         threadId,
-        input: [{ type: "text", text: request.input, text_elements: [] }],
+        input: [{ type: "text", text: input, text_elements: [] }],
+        ...(model ? { model } : {}),
       });
       turn.turnId = started.turn.id;
       if (request.signal.aborted) {
@@ -259,12 +336,26 @@ export class CodexAdapter implements HarnessAdapter {
       }
       rpc.notify("initialized");
       this.rpc = rpc;
+      void this.readAccount(rpc);
       return rpc;
     })();
     try {
       return await this.starting;
     } finally {
       this.starting = null;
+    }
+  }
+
+  private async readAccount(rpc: RpcProcess): Promise<void> {
+    try {
+      const result = await rpc.request<{ account: { type: string; email?: string | null } | null }>("account/read", {});
+      const next = result.account?.email ?? (result.account ? "ChatGPT account" : null);
+      if (next !== this.account) {
+        this.account = next;
+        this.options.onStatusChange?.();
+      }
+    } catch {
+      // Older Codex versions do not have account/read.
     }
   }
 
@@ -277,6 +368,12 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   private onNotification(method: string, params: unknown): void {
+    if (method === "account/login/completed" || method === "account/updated") {
+      this.models = null;
+      if (this.rpc) void this.readAccount(this.rpc);
+      this.options.onStatusChange?.();
+      return;
+    }
     const threadId = (params as { threadId?: string } | null)?.threadId;
     if (!threadId) return;
     const turn = this.turns.get(threadId);
@@ -347,7 +444,12 @@ export class CodexAdapter implements HarnessAdapter {
     turn.emit({ type: "text", text });
   }
 
+  private startIdleTimerIfIdle(): void {
+    if (this.turns.size === 0 && !this.idleTimer) this.startIdleTimer();
+  }
+
   private startIdleTimer(): void {
+    this.clearIdleTimer();
     const idleMs = this.options.idleMs ?? IDLE_MS;
     this.idleTimer = setTimeout(() => {
       if (this.turns.size === 0) void this.close();
@@ -388,6 +490,10 @@ export function codexThreadConfig(
       plugins: false,
       computer_use: false,
       browser_use: false,
+      browser_use_external: false,
+      in_app_browser: false,
+      // Staf keeps memory itself, per agent. Codex's memory belongs to the whole account.
+      memories: false,
     },
     sandbox_workspace_write: {
       network_access: access.network,

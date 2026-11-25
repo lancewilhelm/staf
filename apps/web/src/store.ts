@@ -1,8 +1,10 @@
 import {
   type Activity,
+  type AgentInput,
   type AgentSummary,
   type HealthInfo,
   type Message,
+  type ModelInfo,
   StafClient,
   type StreamEvent,
   type ThreadSummary,
@@ -21,10 +23,22 @@ export interface State {
   agents: AgentSummary[];
   /** The agent that a new chat goes to. */
   agentId: string;
+  /**
+   * A harness and model picked for the next new chat instead of the agent's defaults.
+   * Undefined fields use the agent's setting.
+   */
+  draft: { harness?: string; model?: string | null };
+  /** Model lists by harness, loaded when someone opens a picker. */
+  models: Record<string, ModelList>;
+  settings: SettingsView | null;
   connection: Connection;
   /** The last error from an action, shown once to the person. */
   error: string | null;
 }
+
+export type ModelList = { status: "loading" } | { status: "ready"; list: ModelInfo[] } | { status: "error"; error: string };
+
+export type SettingsView = { section: "agents"; agentId: string | null } | { section: "providers" };
 
 export const api = new StafClient(location.origin);
 
@@ -35,6 +49,9 @@ let state: State = {
   health: null,
   agents: [],
   agentId: readSavedAgent(),
+  draft: {},
+  models: {},
+  settings: null,
   connection: "connecting",
   error: null,
 };
@@ -65,7 +82,7 @@ function readSavedAgent(): string {
 }
 
 export function chooseAgent(agentId: string): void {
-  set({ agentId });
+  set({ agentId, draft: {} });
   try {
     localStorage.setItem("staf.agent", agentId);
   } catch {
@@ -124,6 +141,85 @@ async function loadHealth(): Promise<void> {
   set({ health: await api.health() });
 }
 
+export async function loadModels(harness: string, options: { force?: boolean } = {}): Promise<void> {
+  const current = state.models[harness];
+  if (!options.force && current && current.status !== "error") return;
+  set((s) => ({ models: { ...s.models, [harness]: { status: "loading" } } }));
+  try {
+    const list = await api.listModels(harness);
+    set((s) => ({ models: { ...s.models, [harness]: { status: "ready", list } } }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    set((s) => ({ models: { ...s.models, [harness]: { status: "error", error: message } } }));
+  }
+}
+
+/** The name to show for a model ID, from the loaded lists. */
+export function modelName(models: Record<string, ModelList>, harness: string, model: string | null | undefined): string | null {
+  if (!model) return null;
+  const list = models[harness];
+  if (list?.status === "ready") return list.list.find((m) => m.id === model)?.name ?? model;
+  return model;
+}
+
+/**
+ * Picks the harness and model: for the open conversation from its next message on, or
+ * for the next new chat.
+ */
+export async function chooseHarnessModel(harness: string, model: string | null): Promise<void> {
+  if (state.threadId) {
+    try {
+      await api.updateThread(state.threadId, { harness, model });
+    } catch (error) {
+      report(error);
+    }
+    return;
+  }
+  const agent = state.agents.find((a) => a.id === state.agentId);
+  const same = agent && agent.harness === harness && agent.model === model;
+  set({ draft: same ? {} : { harness, model } });
+}
+
+export function openSettings(view: SettingsView = { section: "agents", agentId: null }): void {
+  set({ settings: view });
+}
+
+export function closeSettings(): void {
+  set({ settings: null });
+}
+
+export async function saveAgent(id: string | null, input: AgentInput): Promise<AgentSummary | null> {
+  try {
+    const agent = id ? await api.updateAgent(id, input) : await api.createAgent(input);
+    await loadAgents();
+    return agent;
+  } catch (error) {
+    report(error);
+    return null;
+  }
+}
+
+export async function removeAgent(id: string): Promise<boolean> {
+  try {
+    await api.deleteAgent(id);
+    if (state.agentId === id) chooseAgent("default");
+    await loadAgents();
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function signIn(harness: string): Promise<void> {
+  try {
+    const { url } = await api.startLogin(harness);
+    window.open(url, "_blank", "noopener");
+  } catch (error) {
+    report(error);
+  }
+}
+
 async function loadAgents(): Promise<void> {
   const agents = await api.listAgents();
   set((current) => ({
@@ -138,7 +234,8 @@ export async function sendMessage(text: string): Promise<void> {
   try {
     let id = state.threadId;
     if (!id) {
-      const thread = await api.createThread({ agentId: state.agentId });
+      const thread = await api.createThread({ agentId: state.agentId, ...state.draft });
+      set({ draft: {} });
       id = thread.id;
       set((current) => ({
         messages: { ...current.messages, [thread.id]: current.messages[thread.id] ?? [] },
@@ -262,6 +359,13 @@ function apply(event: StreamEvent): void {
           activities: upsertActivity(message.activities, event.activity),
         })),
       }));
+      return;
+    case "agents.changed":
+      void loadAgents().catch(() => {});
+      return;
+    case "harnesses.changed":
+      void loadHealth().catch(() => {});
+      set({ models: {} });
       return;
     case "message.completed":
       set((current) => ({

@@ -1,7 +1,11 @@
 // A small API client that works in browsers, Bun, and (later) React Native.
 
 import type {
+  AgentInput,
   AgentSummary,
+  LoginStart,
+  ModelInfo,
+  UpdateThreadRequest,
   ApiErrorBody,
   CreateThreadRequest,
   HealthInfo,
@@ -41,6 +45,26 @@ export class StafClient {
     return this.request("GET", "/api/agents");
   }
 
+  createAgent(input: AgentInput): Promise<AgentSummary> {
+    return this.request("POST", "/api/agents", input);
+  }
+
+  updateAgent(id: string, input: Partial<AgentInput>): Promise<AgentSummary> {
+    return this.request("PATCH", `/api/agents/${encodeURIComponent(id)}`, input);
+  }
+
+  deleteAgent(id: string): Promise<void> {
+    return this.request("DELETE", `/api/agents/${encodeURIComponent(id)}`);
+  }
+
+  listModels(harness: string): Promise<ModelInfo[]> {
+    return this.request("GET", `/api/harnesses/${encodeURIComponent(harness)}/models`);
+  }
+
+  startLogin(harness: string): Promise<LoginStart> {
+    return this.request("POST", `/api/harnesses/${encodeURIComponent(harness)}/login`);
+  }
+
   listThreads(): Promise<ThreadSummary[]> {
     return this.request("GET", "/api/threads");
   }
@@ -51,6 +75,10 @@ export class StafClient {
 
   getThread(id: string): Promise<ThreadDetail> {
     return this.request("GET", `/api/threads/${encodeURIComponent(id)}`);
+  }
+
+  updateThread(id: string, input: UpdateThreadRequest): Promise<ThreadSummary> {
+    return this.request("PATCH", `/api/threads/${encodeURIComponent(id)}`, input);
   }
 
   deleteThread(id: string): Promise<void> {

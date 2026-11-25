@@ -1,6 +1,7 @@
 import type { Message } from "@staf/protocol";
-import { useEffect, useLayoutEffect, useRef } from "react";
-import { chooseAgent, sendMessage, stopAnswer, useStore } from "../store.ts";
+import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
+import { modelName, sendMessage, stopAnswer, useStore } from "../store.ts";
+import { ChatPill } from "./ChatPill.tsx";
 import { Composer } from "./Composer.tsx";
 import { MessageView } from "./MessageView.tsx";
 
@@ -12,7 +13,6 @@ export function ChatView() {
   const messages = useStore((s) => (s.threadId ? (s.messages[s.threadId] ?? EMPTY) : EMPTY));
   const running = thread?.status === "running" || messages.some((m) => m.status === "streaming");
   const agents = useStore((s) => s.agents);
-  const agentId = useStore((s) => s.agentId);
   const threadAgent = agents.find((agent) => agent.id === thread?.agentId);
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -39,26 +39,9 @@ export function ChatView() {
         <div className="hero">
           <h1>What do you want to know?</h1>
           <Composer running={false} autoFocus onSend={(text) => void sendMessage(text)} onStop={() => {}} />
-          {agents.length > 1 && (
-            <div className="agent-picker" role="radiogroup" aria-label="Agent">
-              {agents.map((agent) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={agent.id === agentId}
-                  className={`agent-chip${agent.id === agentId ? " selected" : ""}`}
-                  onClick={() => chooseAgent(agent.id)}
-                  title={agent.harnessLabel}
-                >
-                  <span>{agent.name}</span>
-                  {!agent.harnessLabel.startsWith(agent.name) && (
-                    <span className="agent-harness">{agent.harnessLabel}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="composer-meta">
+            <ChatPill direction="down" />
+          </div>
         </div>
       </main>
     );
@@ -68,8 +51,11 @@ export function ChatView() {
     <main className="chat">
       <div className="messages" ref={scroller} onScroll={onScroll}>
         <div className="column">
-          {messages.map((message) => (
-            <MessageView key={message.id} message={message} />
+          {messages.map((message, index) => (
+            <Fragment key={message.id}>
+              <Switch messages={messages} index={index} />
+              <MessageView message={message} />
+            </Fragment>
           ))}
         </div>
       </div>
@@ -82,8 +68,33 @@ export function ChatView() {
             onSend={(text) => void sendMessage(text)}
             onStop={() => void stopAnswer()}
           />
+          <div className="composer-meta">
+            <ChatPill direction="up" />
+          </div>
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * A divider before a user message whose answer came from another harness or model than
+ * the answer before it.
+ */
+function Switch({ messages, index }: { messages: Message[]; index: number }) {
+  const harnesses = useStore((s) => s.health?.harnesses ?? []);
+  const models = useStore((s) => s.models);
+  const message = messages[index]!;
+  if (message.role !== "user") return null;
+  const answer = messages.slice(index + 1).find((m) => m.role === "assistant");
+  const before = messages.slice(0, index).findLast((m) => m.role === "assistant");
+  if (!answer?.harness || !before?.harness) return null;
+  if (answer.harness === before.harness && (answer.model ?? null) === (before.model ?? null)) return null;
+  const label = harnesses.find((h) => h.id === answer.harness)?.label ?? answer.harness;
+  const model = modelName(models, answer.harness, answer.model);
+  return (
+    <div className="switch" role="separator">
+      <span>Switched to {model && answer.harness === before.harness ? model : model ? `${label} · ${model}` : label}</span>
+    </div>
   );
 }

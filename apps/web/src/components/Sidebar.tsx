@@ -1,5 +1,5 @@
 import type { ThreadSummary } from "@staf/protocol";
-import { deleteThread, openThread, useStore } from "../store.ts";
+import { deleteThread, openSettings, openThread, useStore } from "../store.ts";
 import { Icon } from "./Icon.tsx";
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -45,6 +45,19 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           </section>
         ))}
       </nav>
+      <div className="sidebar-foot">
+        <button
+          type="button"
+          className="sidebar-button"
+          onClick={() => {
+            onClose();
+            openSettings();
+          }}
+        >
+          <Icon name="settings" size={17} />
+          Settings
+        </button>
+      </div>
     </aside>
   );
 }

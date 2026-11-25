@@ -5,6 +5,7 @@ through Codex, Gemini through Antigravity, and Claude through Claude Code) and g
 a simple chat interface in the browser and the terminal. Read the [specification](docs/spec.md) for the design and the delivery plan.
 
 Status: slice 1 is done. Chat works in the web app and the CLI on all three harnesses.
+Agents are created in Settings, and each conversation can switch provider and model.
 
 ## Documentation
 
@@ -26,14 +27,15 @@ Status: slice 1 is done. Chat works in the web app and the CLI on all three harn
 ```sh
 bun install
 bun run build                 # writes dist/staf
-./dist/staf login codex       # signs Staf in to ChatGPT, separately from your own Codex
 ./dist/staf serve             # http://127.0.0.1:4280
+./dist/staf login codex       # or sign in under Settings → Providers in the web app
 ```
 
 In another terminal:
 
 ```sh
 ./dist/staf ask "Is it going to rain tomorrow?"
+./dist/staf ask --harness claude --model haiku "And the day after?"
 ./dist/staf chat
 ./dist/staf apps              # list ChatGPT apps that an agent may be given
 ```

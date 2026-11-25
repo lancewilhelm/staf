@@ -7,8 +7,10 @@ export interface ThreadSummary {
   id: string;
   title: string;
   agentId: string;
-  /** Harness that runs this thread, such as "codex". */
+  /** Harness that runs this thread, such as "codex". It can change during the conversation. */
   harness: string;
+  /** Model that the thread asks for, or null for the harness's default. */
+  model: string | null;
   status: ThreadStatus;
   /** Unix time in milliseconds. */
   createdAt: number;
@@ -53,6 +55,9 @@ export interface Message {
   activities: Activity[];
   status: MessageStatus;
   error?: string;
+  /** For assistant messages: the harness and model that wrote the answer. */
+  harness?: string;
+  model?: string | null;
   createdAt: number;
   completedAt?: number;
 }
@@ -65,18 +70,56 @@ export interface ThreadDetail {
 export interface AgentSummary {
   id: string;
   name: string;
-  /** Harness ID, such as "codex". */
+  /** The default harness ID for new conversations, such as "codex". */
   harness: string;
-  /** Harness name to show, such as "ChatGPT (Codex)". */
+  /** Harness name to show, such as "ChatGPT". */
   harnessLabel: string;
+  /** The default model, or null for the harness's default. */
+  model: string | null;
+  /** The contents of AGENTS.md. */
+  instructions: string;
+  /** Access settings. They are edited in agent.json, not through the API. */
+  network: boolean;
+  writableFolders: string[];
+  harnessApps: string[];
+  /** The default agent cannot be deleted. */
+  isDefault: boolean;
+}
+
+/** Fields that the API can change on an agent. */
+export interface AgentInput {
+  name: string;
+  harness: string;
+  model: string | null;
+  instructions: string;
 }
 
 export interface HarnessInfo {
   id: string;
+  /** Short name, such as "ChatGPT". */
   label: string;
+  /** The program behind it, such as "Codex". */
+  program: string;
   ready: boolean;
   /** Why the harness is not ready, or other short status text. */
   detail?: string;
+  /** One line about how this harness differs from the others. */
+  note?: string;
+  /** Shown as experimental in the app. */
+  experimental?: boolean;
+  /** "staf" when Staf keeps its own sign-in, "machine" when the harness uses this computer's. */
+  signIn: "staf" | "machine";
+  /** Whether the harness is signed in, when Staf can tell. */
+  signedIn?: boolean;
+  /** The signed-in account, such as an email address, when Staf can tell. */
+  account?: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  /** The model that the harness uses when none is chosen. */
+  isDefault?: boolean;
 }
 
 export interface HealthInfo {
@@ -86,6 +129,21 @@ export interface HealthInfo {
 
 export interface CreateThreadRequest {
   agentId?: string;
+  /** Overrides the agent's default harness. */
+  harness?: string;
+  /** Overrides the agent's default model. Null asks for the harness's default. */
+  model?: string | null;
+}
+
+/** Changes the harness or model of a conversation from the next message on. */
+export interface UpdateThreadRequest {
+  harness?: string;
+  model?: string | null;
+}
+
+export interface LoginStart {
+  /** The page to open in a browser to sign in. */
+  url: string;
 }
 
 export interface SendMessageRequest {
@@ -107,7 +165,11 @@ export type StreamEvent =
   /** Replaces the whole text of a streaming message. */
   | { type: "message.text"; threadId: string; messageId: string; text: string }
   | { type: "message.activity"; threadId: string; messageId: string; activity: Activity }
-  | { type: "message.completed"; message: Message };
+  | { type: "message.completed"; message: Message }
+  /** Agents were added, changed, or removed. */
+  | { type: "agents.changed" }
+  /** A harness signed in or out. */
+  | { type: "harnesses.changed" };
 
 export interface ApiErrorBody {
   error: string;

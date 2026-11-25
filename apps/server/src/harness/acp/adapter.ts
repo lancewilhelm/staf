@@ -1,9 +1,10 @@
 // A harness adapter for agents that speak the Agent Client Protocol (ACP) over stdio.
 // https://agentclientprotocol.com. Antigravity (`agy acp`) is the first one.
 
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
-import type { Activity, HarnessInfo } from "@staf/protocol";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
+import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import { VERSION } from "../../config.ts";
 import {
@@ -37,7 +38,13 @@ export interface PermissionContext {
 
 export interface AcpOptions {
   id: string;
+  /** Short name, such as "Gemini". */
   label: string;
+  /** The program behind it, such as "Antigravity". */
+  program: string;
+  /** One line about how this harness differs from the others. */
+  note?: string;
+  experimental?: boolean;
   /** The command that starts the ACP server. */
   command: string[];
   /** Fields for `_meta` on session/new and session/load, such as a system prompt. */
@@ -50,7 +57,17 @@ export interface AcpOptions {
   requires?: string;
   /** Text to show when the agent says that it needs a sign-in. */
   signInHint?: string;
+  /** Where to cache the model list between runs. */
+  modelsCache?: string;
+  /** Deletes the files that the harness keeps for a session. ACP has no call for it. */
+  deleteSessionFiles?: (sessionId: string) => void;
   idleMs?: number;
+}
+
+/** The model list that ACP agents return from session/new and session/load. */
+interface SessionModels {
+  availableModels?: Array<{ modelId: string; name?: string }>;
+  currentModelId?: string;
 }
 
 interface ActiveTurn {
@@ -75,6 +92,9 @@ export class AcpAdapter implements HarnessAdapter {
   private readonly loaded = new Set<string>();
   private readonly turns = new Map<string, ActiveTurn>();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The model that each loaded session uses, so that a change is sent only once. */
+  private readonly sessionModels = new Map<string, string>();
+  private models: { list: ModelInfo[]; defaultId: string | null } | null = null;
 
   constructor(private readonly options: AcpOptions) {
     this.id = options.id;
@@ -82,12 +102,84 @@ export class AcpAdapter implements HarnessAdapter {
   }
 
   async status(): Promise<HarnessInfo> {
-    const base = { id: this.id, label: this.label };
+    const base: HarnessInfo = {
+      id: this.id,
+      label: this.label,
+      program: this.options.program,
+      signIn: "machine",
+      ready: true,
+      ...(this.options.note ? { note: this.options.note } : {}),
+      ...(this.options.experimental ? { experimental: true } : {}),
+    };
     const required = this.options.requires;
     if (required && !Bun.which(required)) {
       return { ...base, ready: false, detail: `The ${required} command is not installed.` };
     }
-    return { ...base, ready: true };
+    return base;
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    this.models ??= this.readModelCache();
+    if (this.models) return this.models.list;
+    // The model list only comes with a session, so open one in an empty folder and delete it.
+    const ready = await this.status();
+    if (!ready.ready) throw new Error(ready.detail ?? `${this.label} is not ready.`);
+    this.clearIdleTimer();
+    const cwd = mkdtempSync(join(tmpdir(), "staf-models-"));
+    try {
+      const rpc = await this.connect();
+      const meta = this.options.sessionMeta?.("");
+      const created = await rpc.request<{ sessionId: string; models?: SessionModels }>("session/new", {
+        cwd,
+        mcpServers: [],
+        ...(meta ? { _meta: meta } : {}),
+      });
+      this.rememberModels(created.models, true);
+      this.loaded.add(created.sessionId);
+      await this.deleteSession(created.sessionId);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      if (this.turns.size === 0) this.startIdleTimer();
+    }
+    // rememberModels() filled the cache, which TypeScript cannot see through the call.
+    return (this.models as { list: ModelInfo[] } | null)?.list ?? [];
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    if (this.loaded.has(sessionId) && this.rpc?.alive) {
+      await this.rpc.request("session/close", { sessionId }).catch(() => {});
+    }
+    this.loaded.delete(sessionId);
+    this.sessionModels.delete(sessionId);
+    this.options.deleteSessionFiles?.(sessionId);
+  }
+
+  /** Keeps the model list from a session response. `fresh` marks a new session, whose model is the default. */
+  private rememberModels(models: SessionModels | undefined, fresh: boolean): void {
+    if (!models?.availableModels?.length) return;
+    const defaultId = fresh ? (models.currentModelId ?? null) : (this.models?.defaultId ?? null);
+    const list = models.availableModels.map((model) => ({
+      id: model.modelId,
+      name: model.name ?? model.modelId,
+      ...(model.modelId === defaultId ? { isDefault: true } : {}),
+    }));
+    this.models = { list, defaultId };
+    if (this.options.modelsCache) {
+      try {
+        writeFileSync(this.options.modelsCache, JSON.stringify(this.models, null, 2) + "\n");
+      } catch {
+        // The cache only saves a lookup.
+      }
+    }
+  }
+
+  private readModelCache(): { list: ModelInfo[]; defaultId: string | null } | null {
+    if (!this.options.modelsCache) return null;
+    try {
+      return JSON.parse(readFileSync(this.options.modelsCache, "utf8")) as { list: ModelInfo[]; defaultId: string | null };
+    } catch {
+      return null;
+    }
   }
 
   async runTurn(request: TurnRequest): Promise<TurnOutcome> {
@@ -106,6 +198,7 @@ export class AcpAdapter implements HarnessAdapter {
     this.rpc?.kill();
     this.rpc = null;
     this.loaded.clear();
+    this.sessionModels.clear();
   }
 
   private async run(request: TurnRequest): Promise<TurnOutcome> {
@@ -137,22 +230,28 @@ export class AcpAdapter implements HarnessAdapter {
     };
 
     let sessionId = request.sessionId;
+    let input = request.input;
     if (sessionId && !this.loaded.has(sessionId)) {
       try {
-        await rpc.request("session/load", { ...sessionParams, sessionId });
+        const loaded = await rpc.request<{ models?: SessionModels } | null>("session/load", { ...sessionParams, sessionId });
+        this.rememberModels(loaded?.models, false);
+        if (loaded?.models?.currentModelId) this.sessionModels.set(sessionId, loaded.models.currentModelId);
       } catch (error) {
         if (!(error instanceof RpcError)) throw error;
+        // The saved session is gone. A new one gets the conversation so far.
         sessionId = null;
+        input = request.inputWithHistory ?? request.input;
       }
-      if (sessionId) await this.applyModel(rpc, sessionId, request);
     }
     if (!sessionId) {
-      const created = await rpc.request<{ sessionId: string }>("session/new", sessionParams);
+      const created = await rpc.request<{ sessionId: string; models?: SessionModels }>("session/new", sessionParams);
       sessionId = created.sessionId;
+      this.rememberModels(created.models, true);
+      if (created.models?.currentModelId) this.sessionModels.set(sessionId, created.models.currentModelId);
       request.emit({ type: "session", sessionId });
-      await this.applyModel(rpc, sessionId, request);
     }
     this.loaded.add(sessionId);
+    await this.applyModel(rpc, sessionId, request);
 
     if (this.turns.has(sessionId)) {
       return { status: "failed", error: "This conversation already has an answer in progress." };
@@ -174,7 +273,7 @@ export class AcpAdapter implements HarnessAdapter {
     try {
       const result = await rpc.request<{ stopReason: string }>("session/prompt", {
         sessionId,
-        prompt: [{ type: "text", text: request.input }],
+        prompt: [{ type: "text", text: input }],
       });
       const outcome = outcomeFor(result.stopReason, request.signal.aborted);
       if (outcome.status === "completed" && !turn.answer.text.trim() && turn.refused.length > 0) {
@@ -193,10 +292,13 @@ export class AcpAdapter implements HarnessAdapter {
     }
   }
 
+  /** Switches the session to the requested model, or back to the default, when it differs. */
   private async applyModel(rpc: RpcProcess, sessionId: string, request: TurnRequest): Promise<void> {
-    if (!request.model) return;
+    const wanted = request.model ?? this.models?.defaultId ?? null;
+    if (!wanted || this.sessionModels.get(sessionId) === wanted) return;
     try {
-      await rpc.request("session/set_model", { sessionId, modelId: request.model });
+      await rpc.request("session/set_model", { sessionId, modelId: wanted });
+      this.sessionModels.set(sessionId, wanted);
     } catch (error) {
       const now = Date.now();
       request.emit({
@@ -204,7 +306,7 @@ export class AcpAdapter implements HarnessAdapter {
         activity: {
           id: "model-not-set",
           kind: "note",
-          title: `Could not use the model "${request.model}"`,
+          title: `Could not use the model "${wanted}"`,
           detail: describeError(error),
           status: "failed",
           startedAt: now,
@@ -251,6 +353,7 @@ export class AcpAdapter implements HarnessAdapter {
   private onExit(rpc: RpcProcess, code: number | null, stderrTail: string): void {
     if (this.rpc === rpc) this.rpc = null;
     this.loaded.clear();
+    this.sessionModels.clear();
     // Prompts that were waiting fail through their rejected requests.
     void code;
     void stderrTail;
@@ -322,6 +425,7 @@ export class AcpAdapter implements HarnessAdapter {
   }
 
   private startIdleTimer(): void {
+    this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       if (this.turns.size === 0) void this.close();
     }, this.options.idleMs ?? IDLE_MS);

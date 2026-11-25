@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activityFromToolCall, defaultPermission, isInside } from "../src/harness/acp/adapter.ts";
-import { antigravityAdapter } from "../src/harness/acp/antigravity.ts";
+import { antigravityAdapter, deleteAntigravitySession } from "../src/harness/acp/antigravity.ts";
 import type { HarnessAdapter, HarnessEvent, TurnRequest } from "../src/harness/types.ts";
 
 const fixture = join(import.meta.dir, "fixtures", "fake-acp.ts");
@@ -29,7 +30,7 @@ function setup(scenario = "answer") {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { id?: number; method?: string; params?: any; result?: any });
-  return { adapter, workspace, sent };
+  return { adapter, dir, workspace, sent };
 }
 
 function turn(workspace: string, overrides: Partial<TurnRequest> = {}) {
@@ -122,10 +123,11 @@ describe("Antigravity over ACP", () => {
   });
 
   test("starts a new session when the saved one is gone", async () => {
-    const { adapter, workspace } = setup("missing-session");
-    const { request, events } = turn(workspace, { sessionId: "gone" });
+    const { adapter, workspace, sent } = setup("missing-session");
+    const { request, events } = turn(workspace, { sessionId: "gone", inputWithHistory: "HISTORY + Weather?" });
     expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
     expect(events[0]).toEqual({ type: "session", sessionId: "session-1" });
+    expect(sent().find((m) => m.method === "session/prompt")!.params.prompt[0].text).toBe("HISTORY + Weather?");
   });
 
   test("cancels the prompt when the signal aborts", async () => {
@@ -199,5 +201,57 @@ describe("activityFromToolCall", () => {
       title: "Used calendar lookup",
       status: "failed",
     });
+  });
+});
+
+describe("Antigravity models and deletion", () => {
+  test("switches models within a session only when the choice changes", async () => {
+    const { adapter, workspace, sent } = setup();
+    await adapter.runTurn(turn(workspace).request);
+    await adapter.runTurn(turn(workspace, { sessionId: "session-1", model: "gem-low" }).request);
+    await adapter.runTurn(turn(workspace, { sessionId: "session-1", model: "gem-low" }).request);
+    await adapter.runTurn(turn(workspace, { sessionId: "session-1", model: null }).request);
+    const switches = sent().filter((m) => m.method === "session/set_model").map((m) => m.params.modelId);
+    expect(switches).toEqual(["gem-low", "gem-high"]);
+  });
+
+  test("lists models from a session that it then deletes, and caches the list", async () => {
+    const { adapter, dir, sent } = setup();
+    const models = await adapter.listModels();
+    expect(models).toEqual([
+      { id: "gem-high", name: "Gem (High)", isDefault: true },
+      { id: "gem-low", name: "Gem (Low)" },
+    ]);
+    expect(sent().filter((m) => m.method === "session/close")).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(dir, "home", "staf-models.json"), "utf8")).defaultId).toBe("gem-high");
+  });
+
+  test("deletes a conversation's files and summary", () => {
+    const data = mkdtempSync(join(tmpdir(), "staf-agy-"));
+    const id = "0d1f43ff-23cc-4efa-9ec4-f106a71986de";
+    const other = "11111111-2222-3333-4444-555555555555";
+    for (const folder of ["conversations", "annotations", `brain/${id}/scratch`, `brain/${other}`]) {
+      mkdirSync(join(data, folder), { recursive: true });
+    }
+    for (const file of [`conversations/${id}.db`, `conversations/${id}.db-wal`, `conversations/${other}.db`, `annotations/${id}.pbtxt`]) {
+      writeFileSync(join(data, file), "x");
+    }
+    const db = new Database(join(data, "conversation_summaries.db"));
+    db.run("CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT)");
+    db.run(`INSERT INTO conversation_summaries VALUES ('${id}', 'Mine'), ('${other}', 'Other')`);
+    db.close();
+
+    deleteAntigravitySession(data, id);
+
+    expect(existsSync(join(data, "conversations", `${id}.db`))).toBe(false);
+    expect(existsSync(join(data, "conversations", `${id}.db-wal`))).toBe(false);
+    expect(existsSync(join(data, "annotations", `${id}.pbtxt`))).toBe(false);
+    expect(existsSync(join(data, "brain", id))).toBe(false);
+    expect(existsSync(join(data, "conversations", `${other}.db`))).toBe(true);
+    expect(existsSync(join(data, "brain", other))).toBe(true);
+    const left = new Database(join(data, "conversation_summaries.db"));
+    expect(left.query("SELECT conversation_id FROM conversation_summaries").all()).toEqual([{ conversation_id: other }]);
+    left.close();
+    expect(() => deleteAntigravitySession(data, "../escape")).toThrow();
   });
 });

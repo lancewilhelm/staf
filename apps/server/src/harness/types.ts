@@ -1,4 +1,4 @@
-import type { Activity, HarnessInfo } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
 import type { AgentAccess } from "../agents.ts";
 
 /** Normalized events that every harness adapter emits while a turn runs. */
@@ -29,6 +29,11 @@ export interface TurnRequest {
   /** Model to request, or null for the harness default. */
   model: string | null;
   input: string;
+  /**
+   * The input for a new session when the saved one is gone: the earlier conversation and
+   * then the new message. Absent when the conversation has no earlier messages.
+   */
+  inputWithHistory?: string;
   /** Aborting the signal interrupts the turn. */
   signal: AbortSignal;
   emit: (event: HarnessEvent) => void;
@@ -36,11 +41,16 @@ export interface TurnRequest {
 
 export interface HarnessAdapter {
   readonly id: string;
+  /** Short name, such as "ChatGPT". */
   readonly label: string;
-  /** Reports whether the harness can run, without starting it. */
+  /** Reports whether the harness can run, without starting a turn. */
   status(): Promise<HarnessInfo>;
+  /** Lists the models that a conversation can ask for. */
+  listModels(): Promise<ModelInfo[]>;
   /** Runs one turn. The promise settles when the turn ends; it never rejects. */
   runTurn(request: TurnRequest): Promise<TurnOutcome>;
+  /** Deletes the harness's own copy of a conversation. Throws if it exists and cannot be deleted. */
+  deleteSession(sessionId: string): Promise<void>;
   /** Stops any process that the adapter started. */
   close(): Promise<void>;
 }

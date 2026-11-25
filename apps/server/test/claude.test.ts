@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeArgs, ClaudeAdapter, claudeSettings, CLAUDE_TOOLS } from "../src/harness/claude/adapter.ts";
@@ -84,12 +84,13 @@ describe("ClaudeAdapter", () => {
 
   test("starts a new session when the saved one is gone", async () => {
     const { adapter, dir, calls } = setup("missing-session");
-    const { request, events } = turn(dir, { sessionId: "gone" });
+    const { request, events } = turn(dir, { sessionId: "gone", inputWithHistory: "HISTORY + What day is it?" });
     // The fake refuses any --resume, so the retry without it must succeed.
     process.env.FAKE_CLAUDE_SCENARIO = "missing-session";
     const outcome = await adapter.runTurn(request);
     expect(calls()).toHaveLength(2);
     expect(calls()[1]!.args).not.toContain("--resume");
+    expect(calls()[1]!.prompt).toBe("HISTORY + What day is it?");
     expect(outcome).toEqual({ status: "completed" });
     expect(events.find((e) => e.type === "session")).toEqual({ type: "session", sessionId: "claude-session-1" });
   });
@@ -133,5 +134,28 @@ describe("claudeArgs", () => {
     const open = claudeSettings({ network: true, harnessApps: [], writableFolders: [] });
     expect(closed).toEqual({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false } });
     expect(open.sandbox).toMatchObject({ network: { allowedDomains: ["*"] } });
+  });
+});
+
+describe("ClaudeAdapter deletion", () => {
+  test("deletes a session's transcript and the files beside it, and nothing else", async () => {
+    const root = mkdtempSync(join(tmpdir(), "staf-claude-home-"));
+    const id = "05c6c067-4e8c-4cc6-bcf9-11af43785ca7";
+    const project = join(root, "projects", "-Users-x--staf-agents-default-workspace");
+    mkdirSync(join(project, id, "subagents"), { recursive: true });
+    mkdirSync(join(root, "session-env", id), { recursive: true });
+    mkdirSync(join(root, "todos"), { recursive: true });
+    writeFileSync(join(project, `${id}.jsonl`), "{}");
+    writeFileSync(join(project, "other.jsonl"), "{}");
+    writeFileSync(join(root, "todos", `${id}-agent-${id}.json`), "[]");
+
+    await new ClaudeAdapter({ command: ["true"], configDir: root }).deleteSession(id);
+
+    expect(existsSync(join(project, `${id}.jsonl`))).toBe(false);
+    expect(existsSync(join(project, id))).toBe(false);
+    expect(existsSync(join(root, "session-env", id))).toBe(false);
+    expect(existsSync(join(root, "todos", `${id}-agent-${id}.json`))).toBe(false);
+    expect(existsSync(join(project, "other.jsonl"))).toBe(true);
+    await expect(new ClaudeAdapter({ configDir: root }).deleteSession("../x")).rejects.toThrow();
   });
 });

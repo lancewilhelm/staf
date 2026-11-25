@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
@@ -44,6 +44,13 @@ export interface Agent {
   instructions: string;
 }
 
+export class AgentNotFoundError extends Error {
+  constructor(agentId: string) {
+    super(`There is no agent named "${agentId}".`);
+    this.name = "AgentNotFoundError";
+  }
+}
+
 export class AgentConfigError extends Error {
   constructor(agentId: string, problem: string) {
     super(`The settings for agent "${agentId}" have a problem: ${problem}`);
@@ -70,6 +77,16 @@ You are Staf, a personal assistant for a household.
 `;
 
 const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const NAME_LENGTH = 60;
+const INSTRUCTIONS_LENGTH = 50_000;
+
+/** The fields that the web app and the API can change. Access settings stay in agent.json. */
+export interface AgentEdit {
+  name?: string;
+  harness?: string;
+  model?: string | null;
+  instructions?: string;
+}
 
 export class Agents {
   /**
@@ -154,6 +171,57 @@ export class Agents {
     };
   }
 
+  /** Creates an agent folder with default access settings, and returns the new agent. */
+  create(input: Required<AgentEdit>): Agent {
+    const name = checkName(input.name);
+    checkInstructions(input.instructions);
+    const base = slug(name);
+    let id = base;
+    for (let n = 2; existsSync(join(this.root, id)); n++) id = `${base}-${n}`.slice(0, 63);
+    const dir = join(this.root, id);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const settings: AgentSettings = { ...DEFAULT_SETTINGS, name, harness: input.harness, model: input.model };
+    writeFileSync(join(dir, "agent.json"), JSON.stringify(settings, null, 2) + "\n");
+    writeFileSync(join(dir, "AGENTS.md"), input.instructions);
+    return this.get(id)!;
+  }
+
+  /**
+   * Changes an agent's name, harness, model, or instructions. Other fields in agent.json,
+   * including ones that Staf does not know, are kept as they are.
+   */
+  update(id: string, edit: AgentEdit): Agent {
+    const current = this.get(id);
+    if (!current) throw new AgentNotFoundError(id);
+    const settingsPath = join(current.dir, "agent.json");
+    const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+    if (edit.name !== undefined) raw.name = checkName(edit.name);
+    if (edit.harness !== undefined) raw.harness = edit.harness;
+    if (edit.model !== undefined) raw.model = edit.model;
+    parseSettings(id, raw);
+    writeFileSync(settingsPath, JSON.stringify(raw, null, 2) + "\n");
+    if (edit.instructions !== undefined) {
+      checkInstructions(edit.instructions);
+      writeFileSync(join(current.dir, "AGENTS.md"), edit.instructions);
+    }
+    return this.get(id)!;
+  }
+
+  /**
+   * Moves an agent's folder, with its workspace, to Staf's trash folder. The default agent
+   * cannot be removed.
+   */
+  remove(id: string): string {
+    if (id === DEFAULT_AGENT_ID) throw new AgentConfigError(id, "the default agent cannot be deleted.");
+    if (!AGENT_ID.test(id) || !existsSync(join(this.root, id, "agent.json"))) throw new AgentNotFoundError(id);
+    const trash = join(this.stafHome, "trash", "agents");
+    mkdirSync(trash, { recursive: true, mode: 0o700 });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const target = join(trash, `${id}-${stamp}`);
+    renameSync(join(this.root, id), target);
+    return target;
+  }
+
   /** Expands `~`, and refuses folders that would let the agent change Staf's own data. */
   private checkFolder(id: string, folder: string): string {
     const expanded = folder === "~" ? homedir() : folder.replace(/^~(?=\/)/, homedir());
@@ -170,6 +238,40 @@ export class Agents {
     }
     return path;
   }
+}
+
+function checkName(name: string): string {
+  const trimmed = name.replace(/\s+/g, " ").trim();
+  if (!trimmed) throw new AgentInputError("Give the agent a name.");
+  if (trimmed.length > NAME_LENGTH) throw new AgentInputError(`Keep the name under ${NAME_LENGTH} characters.`);
+  return trimmed;
+}
+
+function checkInstructions(text: string): void {
+  if (text.length > INSTRUCTIONS_LENGTH) {
+    throw new AgentInputError(`Keep the instructions under ${INSTRUCTIONS_LENGTH.toLocaleString("en-US")} characters.`);
+  }
+}
+
+/** A problem with values that a person entered for an agent. */
+export class AgentInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentInputError";
+  }
+}
+
+/** Turns a name into a folder name such as "morning-paper". */
+export function slug(name: string): string {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  return base || "agent";
 }
 
 function parseSettings(id: string, raw: unknown): AgentSettings {

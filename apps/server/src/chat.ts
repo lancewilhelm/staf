@@ -1,4 +1,4 @@
-import type { Activity, Message, SendMessageResponse, ThreadSummary } from "@staf/protocol";
+import type { Activity, Message, SendMessageResponse, ThreadSummary, UpdateThreadRequest } from "@staf/protocol";
 import { type Agent, AgentConfigError, type AgentAccess, chatInstructions, DEFAULT_AGENT_ID, type Agents } from "./agents.ts";
 import type { EventBus } from "./bus.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome } from "./harness/types.ts";
@@ -15,6 +15,8 @@ export class ChatError extends Error {
 }
 
 const TITLE_LENGTH = 60;
+/** How much of the earlier conversation a new harness session receives, in characters. */
+const HANDOFF_LENGTH = 40_000;
 /** How often streamed text is written to the database while an answer runs. */
 const SAVE_INTERVAL_MS = 1000;
 
@@ -36,18 +38,21 @@ export class ChatService {
     return this.store.listThreads().map(publicThread);
   }
 
-  createThread(agentId = DEFAULT_AGENT_ID): ThreadSummary {
+  createThread(
+    agentId = DEFAULT_AGENT_ID,
+    choice: { harness?: string; model?: string | null } = {},
+  ): ThreadSummary {
     const agent = this.loadAgent(agentId);
     if (!agent) throw new ChatError(404, `There is no agent named "${agentId}".`);
-    const harness = this.harnessOverride ?? agent.harness;
-    if (!this.harnesses.has(harness)) {
-      const known = [...this.harnesses.keys()].join(", ");
-      throw new ChatError(409, `The agent "${agent.id}" uses the harness "${harness}", which Staf does not have. Use one of: ${known}.`);
-    }
+    const harness = this.harnessOverride ?? choice.harness ?? agent.harness;
+    this.checkHarness(harness, choice.harness ? null : agent.id);
+    // A harness picked for this conversation starts on its own default model.
+    const model = choice.model !== undefined ? choice.model : choice.harness && choice.harness !== agent.harness ? null : agent.model;
     const thread = this.store.createThread({
       title: "New chat",
       agentId: agent.id,
       harness,
+      model,
     });
     const summary = publicThread(thread);
     this.bus.publish({ type: "thread.upserted", thread: summary });
@@ -64,14 +69,65 @@ export class ChatService {
     return { thread: publicThread(thread), messages };
   }
 
+  /**
+   * Changes the harness or model of a conversation from the next message on. A new harness
+   * starts a new session, which receives the earlier conversation with the next message.
+   */
+  updateThread(id: string, change: UpdateThreadRequest): ThreadSummary {
+    const thread = this.store.getThread(id);
+    if (!thread) throw new ChatError(404, "That conversation does not exist.");
+    if (this.running.has(id)) throw new ChatError(409, "Wait for the current answer to finish, or stop it first.");
+    const harness = change.harness ?? thread.harness;
+    if (change.harness !== undefined) this.checkHarness(harness, null);
+    const switching = harness !== thread.harness;
+    const model = change.model !== undefined ? change.model : switching ? null : thread.model;
+    const updated = this.store.updateThread(id, {
+      harness,
+      model,
+      ...(switching ? { sessionId: null } : {}),
+    })!;
+    const summary = publicThread(updated);
+    this.bus.publish({ type: "thread.upserted", thread: summary });
+    return summary;
+  }
+
+  /** Deletes a conversation, and the copies that its harnesses keep. */
   async deleteThread(id: string): Promise<void> {
     const run = this.running.get(id);
     if (run) {
       run.controller.abort();
       await run.done;
     }
-    if (!this.store.deleteThread(id)) throw new ChatError(404, "That conversation does not exist.");
+    if (!this.store.getThread(id)) throw new ChatError(404, "That conversation does not exist.");
+    for (const session of this.store.listSessions(id)) {
+      const harness = this.harnesses.get(session.harness);
+      // A harness that Staf no longer has cannot be asked; its copy stays where it is.
+      if (!harness) continue;
+      try {
+        await harness.deleteSession(session.sessionId);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new ChatError(
+          502,
+          `Staf could not delete ${harness.label}'s copy of this conversation, so it kept the conversation. ${reason}`,
+        );
+      }
+    }
+    this.store.deleteThread(id);
     this.bus.publish({ type: "thread.deleted", threadId: id });
+  }
+
+  /** Deletes every conversation of an agent, as `deleteThread` does. */
+  async deleteThreadsOf(agentId: string): Promise<void> {
+    for (const thread of this.store.listThreadsForAgent(agentId)) await this.deleteThread(thread.id);
+  }
+
+  /** Throws unless Staf has the harness. `agentId` names the agent whose setting chose it. */
+  checkHarness(harness: string, agentId: string | null): void {
+    if (this.harnesses.has(harness)) return;
+    const known = [...this.harnesses.keys()].join(", ");
+    const subject = agentId ? `The agent "${agentId}" uses the harness "${harness}"` : `The harness "${harness}"`;
+    throw new ChatError(409, `${subject}, which Staf does not have. Use one of: ${known}.`);
   }
 
   interrupt(id: string): void {
@@ -90,13 +146,19 @@ export class ChatService {
     const agent = this.loadAgent(thread.agentId);
     if (!agent) throw new ChatError(409, `The agent "${thread.agentId}" no longer exists.`);
 
-    const isFirst = this.store.listMessages(threadId).length === 0;
+    const earlier = this.store.listMessages(threadId);
+    const isFirst = earlier.length === 0;
+    // A thread without a session but with earlier messages has moved to another harness.
+    const withHistory = isFirst ? undefined : handoffInput(earlier, text);
+    const input = !thread.sessionId && withHistory ? withHistory : text;
     const userMessage = this.store.addMessage({ threadId, role: "user", text, status: "complete" });
     const assistantMessage = this.store.addMessage({
       threadId,
       role: "assistant",
       text: "",
       status: "streaming",
+      harness: thread.harness,
+      model: thread.model,
     });
     const updated = this.store.updateThread(threadId, {
       status: "running",
@@ -115,8 +177,9 @@ export class ChatService {
       cwd: agent.workspace,
       access: agent.access,
       instructions: chatInstructions(agent),
-      model: agent.model,
-      input: text,
+      model: thread.model,
+      input,
+      ...(withHistory ? { inputWithHistory: withHistory } : {}),
       message: assistantMessage,
       signal: controller.signal,
     })
@@ -156,6 +219,7 @@ export class ChatService {
     instructions: string;
     model: string | null;
     input: string;
+    inputWithHistory?: string;
     message: Message;
     signal: AbortSignal;
   }): Promise<void> {
@@ -175,6 +239,7 @@ export class ChatService {
       switch (event.type) {
         case "session":
           this.store.updateThread(threadId, { sessionId: event.sessionId });
+          this.store.addSession({ harness: input.harnessId, sessionId: event.sessionId, threadId });
           return;
         case "text":
           text += event.text;
@@ -207,6 +272,7 @@ export class ChatService {
             instructions: input.instructions,
             model: input.model,
             input: input.input,
+            ...(input.inputWithHistory ? { inputWithHistory: input.inputWithHistory } : {}),
             signal: input.signal,
             emit,
           })
@@ -250,6 +316,31 @@ function mergeActivity(activities: Activity[], next: Activity): Activity {
   const merged = { ...next, startedAt: activities[index]!.startedAt };
   activities[index] = merged;
   return merged;
+}
+
+/**
+ * The first message to a new harness session in a conversation that started elsewhere:
+ * the earlier conversation as text, newest kept when it is long, then the new message.
+ */
+export function handoffInput(earlier: Message[], text: string): string {
+  const turns: string[] = [];
+  let length = 0;
+  for (const message of [...earlier].reverse()) {
+    const body = message.text.trim();
+    if (!body) continue;
+    const tag = message.role === "user" ? "person" : "assistant";
+    const turn = `<${tag}>\n${body}\n</${tag}>`;
+    if (length + turn.length > HANDOFF_LENGTH) break;
+    turns.unshift(turn);
+    length += turn.length;
+  }
+  if (turns.length === 0) return text;
+  return [
+    "[Staf: this conversation started with another assistant. Here is what was said so far, oldest first. Continue it naturally. You do not need to mention the switch.]",
+    `<conversation>\n${turns.join("\n")}\n</conversation>`,
+    "[The person's new message follows.]",
+    text,
+  ].join("\n\n");
 }
 
 function titleFrom(text: string): string {

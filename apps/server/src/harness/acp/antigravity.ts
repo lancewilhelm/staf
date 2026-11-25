@@ -1,4 +1,6 @@
-import { mkdirSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { AcpAdapter, defaultPermission } from "./adapter.ts";
 
 export interface AntigravityOptions {
@@ -12,6 +14,9 @@ export interface AntigravityOptions {
   command?: string[];
 }
 
+export const ANTIGRAVITY_NOTE =
+  "Experimental. Commands can't reach the internet, and Google has suspended Antigravity access for accounts that use it for automation.";
+
 /**
  * Antigravity through `agy acp`. Commands run in agy's sandbox, which allows writes only
  * in the workspace and blocks network access. The model can ask to run a command outside
@@ -21,7 +26,10 @@ export function antigravityAdapter(options: AntigravityOptions): AcpAdapter {
   mkdirSync(options.home, { recursive: true, mode: 0o700 });
   return new AcpAdapter({
     id: "antigravity",
-    label: "Gemini (Antigravity)",
+    label: "Gemini",
+    program: "Antigravity",
+    note: ANTIGRAVITY_NOTE,
+    experimental: true,
     command: options.command ?? [
       "agy",
       "acp",
@@ -46,5 +54,38 @@ export function antigravityAdapter(options: AntigravityOptions): AcpAdapter {
           ]
         : [],
     signInHint: "Sign in to Antigravity by running `agy` once in a terminal.",
+    modelsCache: join(options.home, "staf-models.json"),
+    deleteSessionFiles: (sessionId) => deleteAntigravitySession(join(options.home, "antigravity-cli"), sessionId),
   });
+}
+
+const SESSION_ID = /^[A-Za-z0-9-]{8,80}$/;
+
+/**
+ * Deletes what agy 1.5 keeps for one conversation: its database, annotations, the
+ * per-conversation `brain/` folder, and its row in the conversation summaries.
+ */
+export function deleteAntigravitySession(dataDir: string, sessionId: string): void {
+  if (!SESSION_ID.test(sessionId)) throw new Error(`"${sessionId}" is not an Antigravity session ID.`);
+  const conversations = join(dataDir, "conversations");
+  if (existsSync(conversations)) {
+    for (const name of readdirSync(conversations)) {
+      if (name === `${sessionId}.db` || name.startsWith(`${sessionId}.db-`)) {
+        rmSync(join(conversations, name), { force: true });
+      }
+    }
+  }
+  rmSync(join(dataDir, "annotations", `${sessionId}.pbtxt`), { force: true });
+  rmSync(join(dataDir, "brain", sessionId), { recursive: true, force: true });
+
+  const summaries = join(dataDir, "conversation_summaries.db");
+  if (existsSync(summaries)) {
+    const db = new Database(summaries, { strict: true });
+    try {
+      db.run("PRAGMA busy_timeout = 2000");
+      db.query("DELETE FROM conversation_summaries WHERE conversation_id = $id").run({ id: sessionId });
+    } finally {
+      db.close();
+    }
+  }
 }

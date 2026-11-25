@@ -97,6 +97,26 @@ async function handle(message: { id?: number; method?: string; params?: any }): 
         },
       });
       return;
+    case "model/list":
+      send({
+        id,
+        result: {
+          data: [
+            { id: "gpt-a", displayName: "GPT-A", hidden: false, isDefault: true },
+            { id: "gpt-b", displayName: "GPT-B", hidden: false, isDefault: false },
+            { id: "gpt-hidden", displayName: "Hidden", hidden: true, isDefault: false },
+          ],
+          nextCursor: null,
+        },
+      });
+      return;
+    case "account/read":
+      send({ id, result: { account: { type: "chatgpt", email: "person@example.com", planType: "plus" }, requiresOpenaiAuth: true } });
+      return;
+    case "thread/delete":
+      if (params.threadId === "thread-gone") send({ id, error: { code: -32600, message: "thread not found" } });
+      else send({ id, result: {} });
+      return;
     case "turn/interrupt":
       send({ id, result: {} });
       if (slowTurn) completeTurn(slowTurn.threadId, slowTurn.turnId, "interrupted");

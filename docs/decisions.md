@@ -3,6 +3,33 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Access settings are edited only in agent.json
+
+The web app and the API can change an agent's name, default provider and model, and
+instructions. They cannot change `network`, `writableFolders`, or `harnessApps`.
+
+Why: the API has no sign-in until slice 6, and commands that an agent runs can reach it.
+A prompt injection could otherwise make an agent give itself write access to any folder
+or to the owner's account apps.
+
+## 2026-11-25: A new harness session gets the conversation as text
+
+When a conversation moves to another harness, or a harness has lost its saved session,
+Staf starts a new session and sends the earlier questions and answers, up to 40,000
+characters with the newest kept, ahead of the new message.
+
+Why: harness sessions cannot move between harnesses, and Staf already stores every
+message. Earlier steps, such as command output, are left out to keep the handoff short.
+
+## 2026-11-25: Deleting a conversation fails if a harness cannot delete its copy
+
+Staf records every harness session that a conversation used. Deleting the conversation
+deletes each session's copy first. If one fails, Staf keeps the conversation and reports
+the error.
+
+Why: a conversation that disappears from Staf while a copy stays in the harness would be
+hard to find and delete later.
+
 ## 2026-11-25: Memory belongs to one agent and starts with the Hermes design
 
 Each agent has its own memory, and nothing is shared between agents or people for now.
