@@ -166,9 +166,13 @@ fast mode when they are set, such as "Opus 5.5 · High · Fast". Once there is m
 agent, it starts with the agent's name. Its menu picks:
 
 - **The agent,** for a new chat.
-- **The provider, model, reasoning level, and fast mode,** for this conversation. A new
-  chat starts with the agent's defaults. The menu shows only the levels and the fast mode
-  that the chosen model offers.
+- **The provider, model, reasoning level, and fast mode,** for this conversation. The
+  menu shows only the levels and the fast mode that the chosen model offers.
+
+A new chat starts with the provider, model, and level that were last picked for the agent
+in this browser, or with the agent's defaults before anything is picked. Fast mode does
+not carry over, so that a forgotten switch cannot keep costing. Saving the agent in
+Settings resets the choice to the new defaults.
 
 During a conversation:
 

@@ -1039,9 +1039,12 @@ button.link {
 }
 
 .settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   width: 180px;
   flex-shrink: 0;
-  padding: 10px;
+  padding: 14px 12px;
   border-right: 1px solid var(--line);
   background: var(--bg);
 }
@@ -1052,7 +1055,7 @@ button.link {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-radius: 10px;
   font-size: 14px;
   text-align: left;
@@ -1083,9 +1086,12 @@ button.link {
 }
 
 .agent-list {
-  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 210px;
   flex-shrink: 0;
-  padding: 10px;
+  padding: 14px 12px;
   border-right: 1px solid var(--line);
 }
 
@@ -1099,7 +1105,7 @@ button.link {
   flex-direction: row;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .agent-name {
@@ -1426,7 +1432,7 @@ button.link {
   }
 
   .settings-nav {
-    display: flex;
+    flex-direction: row;
     gap: 6px;
     width: auto;
     padding: 8px 14px;
@@ -1443,7 +1449,7 @@ button.link {
   }
 
   .agent-list {
-    display: flex;
+    flex-direction: row;
     gap: 6px;
     width: auto;
     padding: 10px 14px;

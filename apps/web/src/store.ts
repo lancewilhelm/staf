@@ -51,6 +51,41 @@ export type SettingsView = { section: "agents"; agentId: string | null } | { sec
 
 export const api = new StafClient(location.origin);
 
+const LAST_CHOICE_KEY = "staf.lastChoice";
+
+/** The provider, model, and level last picked for each agent in this browser. */
+type LastChoices = Record<string, Omit<Choice, "fast">>;
+
+function readLastChoices(): LastChoices {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(LAST_CHOICE_KEY) ?? "{}");
+    return typeof value === "object" && value !== null ? (value as LastChoices) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Where a new chat with an agent starts: the provider, model, and level that were last
+ * picked for it. Fast mode is left out, so that a forgotten switch cannot keep costing.
+ */
+function lastChoice(agentId: string): Partial<Choice> {
+  const saved = readLastChoices()[agentId];
+  if (!saved || typeof saved.harness !== "string") return {};
+  return { harness: saved.harness, model: saved.model ?? null, effort: saved.effort ?? null };
+}
+
+function rememberChoice(agentId: string, choice: Choice | null): void {
+  try {
+    const all = readLastChoices();
+    if (choice) all[agentId] = { harness: choice.harness, model: choice.model, effort: choice.effort };
+    else delete all[agentId];
+    localStorage.setItem(LAST_CHOICE_KEY, JSON.stringify(all));
+  } catch {
+    // New chats then start from the agent's defaults.
+  }
+}
+
 let state: State = {
   threadId: threadFromPath(location.pathname),
   threads: [],
@@ -58,7 +93,7 @@ let state: State = {
   health: null,
   agents: [],
   agentId: readSavedAgent(),
-  draft: {},
+  draft: lastChoice(readSavedAgent()),
   models: {},
   settings: null,
   connection: "connecting",
@@ -99,7 +134,7 @@ function readSavedAgent(): string {
 }
 
 export function chooseAgent(agentId: string): void {
-  set({ agentId, draft: {} });
+  set({ agentId, draft: lastChoice(agentId) });
   try {
     localStorage.setItem("staf.agent", agentId);
   } catch {
@@ -161,7 +196,8 @@ async function loadHealth(): Promise<void> {
 export async function loadModels(harness: string, options: { force?: boolean } = {}): Promise<void> {
   const current = state.models[harness];
   if (!options.force && current && current.status !== "error") return;
-  set((s) => ({ models: { ...s.models, [harness]: { status: "loading" } } }));
+  // A list that is being refreshed stays on screen until the new one arrives.
+  if (current?.status !== "ready") set((s) => ({ models: { ...s.models, [harness]: { status: "loading" } } }));
   try {
     const list = await api.listModels(harness);
     set((s) => ({ models: { ...s.models, [harness]: { status: "ready", list } } }));
@@ -200,7 +236,10 @@ export function modelName(models: Record<string, ModelList>, harness: string, mo
 export async function choose(change: Partial<Choice>): Promise<void> {
   if (state.threadId) {
     try {
-      await api.updateThread(state.threadId, change);
+      const thread = await api.updateThread(state.threadId, change);
+      // The next new chat with this agent starts with the same choice.
+      rememberChoice(thread.agentId, thread);
+      if (thread.agentId === state.agentId) set({ draft: lastChoice(thread.agentId) });
     } catch (error) {
       report(error);
     }
@@ -208,6 +247,14 @@ export async function choose(change: Partial<Choice>): Promise<void> {
   }
   const agent = state.agents.find((a) => a.id === state.agentId);
   const draft = { ...state.draft, ...change };
+  if (agent) {
+    rememberChoice(agent.id, {
+      harness: draft.harness ?? agent.harness,
+      model: draft.model === undefined ? agent.model : draft.model,
+      effort: draft.effort === undefined ? agent.effort : draft.effort,
+      fast: false,
+    });
+  }
   const same =
     agent &&
     (draft.harness ?? agent.harness) === agent.harness &&
@@ -228,6 +275,9 @@ export function closeSettings(): void {
 export async function saveAgent(id: string | null, input: AgentInput): Promise<AgentSummary | null> {
   try {
     const agent = id ? await api.updateAgent(id, input) : await api.createAgent(input);
+    // New defaults apply to the next new chat, ahead of the last choice in the pill.
+    rememberChoice(agent.id, null);
+    if (agent.id === state.agentId && !state.threadId) set({ draft: {} });
     await loadAgents();
     return agent;
   } catch (error) {
@@ -272,7 +322,7 @@ export async function sendMessage(text: string): Promise<void> {
     let id = state.threadId;
     if (!id) {
       const thread = await api.createThread({ agentId: state.agentId, ...state.draft });
-      set({ draft: {} });
+      set({ draft: lastChoice(state.agentId) });
       id = thread.id;
       set((current) => ({
         messages: { ...current.messages, [thread.id]: current.messages[thread.id] ?? [] },
@@ -400,10 +450,13 @@ function apply(event: StreamEvent): void {
     case "agents.changed":
       void loadAgents().catch(() => {});
       return;
-    case "harnesses.changed":
+    case "harnesses.changed": {
       void loadHealth().catch(() => {});
-      set({ models: {} });
+      // A sign-in can change which models a harness offers, so reload the lists in use.
+      const inUse = Object.keys(state.models);
+      for (const harness of inUse) void loadModels(harness, { force: true });
       return;
+    }
     case "message.completed":
       set((current) => ({
         messages: updateMessage(
