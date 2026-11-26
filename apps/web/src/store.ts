@@ -146,6 +146,14 @@ export function chooseAgent(agentId: string): void {
   }
 }
 
+/** Starts a new chat with an agent, or with the open conversation's agent if none is given. */
+export function startChat(agentId?: string): void {
+  const thread = state.threadId ? state.threads.find((t) => t.id === state.threadId) : undefined;
+  const target = agentId ?? thread?.agentId ?? state.agentId;
+  if (target !== state.agentId) chooseAgent(target);
+  openThread(null);
+}
+
 function threadFromPath(path: string): string | null {
   const match = /^\/t\/([^/]+)$/.exec(path);
   return match ? decodeURIComponent(match[1]!) : null;

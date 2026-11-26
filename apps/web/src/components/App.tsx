@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { dismissError, openSettings, openThread, useStore } from "../store.ts";
+import { dismissError, openSettings, startChat, useStore } from "../store.ts";
 import { ChatView } from "./ChatView.tsx";
 import { Icon } from "./Icon.tsx";
 import { Settings } from "./Settings.tsx";
@@ -16,11 +16,11 @@ export function App() {
       {menuOpen && <div className="scrim" onClick={() => setMenuOpen(false)} />}
       <div className="main">
         <header className="topbar">
-          <button type="button" className="icon-button menu" onClick={() => setMenuOpen(true)} aria-label="Open conversations">
+          <button type="button" className="icon-button" onClick={() => setMenuOpen(true)} aria-label="Open menu">
             <Icon name="menu" />
           </button>
-          <span className="topbar-title">{title ?? ""}</span>
-          <button type="button" className="icon-button menu" onClick={() => openThread(null)} aria-label="New chat">
+          <span className="topbar-title">{title ?? "Staf"}</span>
+          <button type="button" className="icon-button" onClick={() => startChat()} aria-label="New chat">
             <Icon name="plus" />
           </button>
         </header>

@@ -159,15 +159,23 @@ Staf creates the `workspace/` folder the first time the agent runs. Changes to
 moves its folder, with its workspace, to `~/.staf/trash/agents/`. The default agent cannot
 be deleted.
 
-## Choosing the provider and model for one conversation
+## Picking an agent and choosing a provider or model
+
+The left sidebar lists your agents above the conversations. On phones, open the menu
+button in the top-left corner to reach the same sidebar.
+
+- **Pick an agent** in the sidebar to start a new chat with it and view its
+  conversations. Click `+` next to Agents to create one, or click the edit icon on an
+  agent to open it in **Settings → Agents**.
+- **Find conversations across agents.** By default, the conversation list shows only the
+  current agent's conversations. Once there is more than one agent, click **All agents**
+  at the top of the list to show conversations from every agent, with each agent's name
+  under the conversation title.
 
 The pill under the message box shows the model or provider, and the reasoning level and
-fast mode when they are set, such as "Opus 5.5 · High · Fast". Once there is more than one
-agent, it starts with the agent's name. Its menu picks:
-
-- **The agent,** for a new chat.
-- **The provider, model, reasoning level, and fast mode,** for this conversation. The
-  menu shows only the levels and the fast mode that the chosen model offers.
+fast mode when they are set, such as "Opus 5.5 · High · Fast". Its menu picks the
+provider, model, reasoning level, and fast mode for this conversation, and shows only the
+levels and the fast mode that the chosen model offers.
 
 A new chat starts with the provider, model, and level that were last picked for the agent
 in this browser, or with the agent's defaults before anything is picked. Fast mode does

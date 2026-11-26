@@ -13,7 +13,8 @@ export function ChatView() {
   const messages = useStore((s) => (s.threadId ? (s.messages[s.threadId] ?? EMPTY) : EMPTY));
   const running = thread?.status === "running" || messages.some((m) => m.status === "streaming");
   const agents = useStore((s) => s.agents);
-  const threadAgent = agents.find((agent) => agent.id === thread?.agentId);
+  const agentId = useStore((s) => s.agentId);
+  const currentAgent = agents.find((agent) => agent.id === (thread?.agentId ?? agentId)) ?? null;
 
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -37,8 +38,15 @@ export function ChatView() {
     return (
       <main className="chat empty">
         <div className="hero">
+          {agents.length > 1 && currentAgent && <p className="hero-agent">{currentAgent.name}</p>}
           <h1>What do you want to know?</h1>
-          <Composer running={false} autoFocus onSend={(text) => void sendMessage(text)} onStop={() => {}} />
+          <Composer
+            running={false}
+            autoFocus
+            placeholder={agents.length > 1 && currentAgent ? `Ask ${currentAgent.name}` : "Ask anything"}
+            onSend={(text) => void sendMessage(text)}
+            onStop={() => {}}
+          />
           <div className="composer-meta">
             <ChatPill direction="down" />
           </div>
@@ -64,7 +72,7 @@ export function ChatView() {
           <Composer
             running={running}
             autoFocus
-            placeholder={threadAgent && agents.length > 1 ? `Ask ${threadAgent.name} a follow-up` : "Ask a follow-up"}
+            placeholder={currentAgent && agents.length > 1 ? `Ask ${currentAgent.name} a follow-up` : "Ask a follow-up"}
             onSend={(text) => void sendMessage(text)}
             onStop={() => void stopAnswer()}
           />

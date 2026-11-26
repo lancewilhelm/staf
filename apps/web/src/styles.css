@@ -151,17 +151,172 @@ textarea:focus-visible {
   letter-spacing: -0.02em;
 }
 
+.sidebar-agents {
+  padding: 6px 8px 10px;
+  border-bottom: 1px solid var(--line);
+  max-height: 36vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.sidebar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px 4px;
+}
+
+.sidebar-section-head h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.sidebar-action {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: -4px;
+  border-radius: 7px;
+  color: var(--faint);
+}
+
+.sidebar-action:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.sidebar-filter {
+  padding: 1px 7px;
+  margin-right: -4px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.sidebar-filter:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.sidebar-filter.active {
+  background: var(--active);
+  color: var(--text);
+}
+
+.agent-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+}
+
+.agent-row:hover {
+  background: var(--hover);
+}
+
+.agent-row.active {
+  background: var(--active);
+}
+
+.agent-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px 6px 10px;
+  text-align: left;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.agent-row:hover .agent-link,
+.agent-row.active .agent-link {
+  color: var(--text);
+}
+
+.agent-row.active .agent-link {
+  font-weight: 550;
+}
+
+.agent-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.agent-row.active .agent-badge {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.agent-row-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-edit {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 2px;
+  border-radius: 8px;
+  color: var(--faint);
+  opacity: 0;
+}
+
+.agent-row:hover .agent-edit,
+.agent-edit:focus-visible {
+  opacity: 1;
+}
+
+.agent-edit:hover {
+  color: var(--text);
+}
+
 .thread-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 8px 16px;
+  padding: 8px 8px 16px;
 }
 
-.thread-list h2 {
+.thread-list h3 {
   font-size: 12px;
   font-weight: 550;
   color: var(--faint);
-  margin: 16px 10px 4px;
+  margin: 12px 10px 4px;
+}
+
+.thread-list section:first-of-type h3 {
+  margin-top: 6px;
+}
+
+.thread-empty {
+  margin: 8px 10px;
+  font-size: 13px;
+  color: var(--faint);
 }
 
 .thread-row {
@@ -189,7 +344,23 @@ textarea:focus-visible {
   font-size: 14px;
 }
 
+.thread-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .thread-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.thread-agent {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--faint);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -250,6 +421,14 @@ textarea:focus-visible {
   max-width: 720px;
   margin: 0 auto;
   padding: 0 20px 12vh;
+}
+
+.hero-agent {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--muted);
 }
 
 .hero h1 {
@@ -1557,6 +1736,7 @@ button.link {
     text-overflow: ellipsis;
   }
 
+  .agent-edit,
   .thread-delete {
     opacity: 1;
   }

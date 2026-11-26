@@ -2,7 +2,6 @@ import type { HarnessInfo, ModelInfo } from "@staf/protocol";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   choose,
-  chooseAgent,
   effortName,
   loadModels,
   modelInfo,
@@ -14,9 +13,8 @@ import {
 import { Icon } from "./Icon.tsx";
 
 /**
- * The small pill under the composer. It shows who answers (agent, harness, model, level)
- * and opens a menu to change it: the agent for a new chat, and the rest for this
- * conversation.
+ * The small pill under the composer. It shows which provider, model, reasoning level,
+ * and fast mode answer, and opens a menu to change them for this conversation.
  */
 export function ChatPill({ direction }: { direction: "up" | "down" }) {
   const [open, setOpen] = useState(false);
@@ -74,9 +72,7 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
     };
   }, [open, harnessId]);
 
-  // The agent's name matters only once there is more than one agent.
   const label = [
-    agents.length > 1 ? (agent?.name ?? null) : null,
     modelName(models, harnessId, model) ?? harness?.label ?? harnessId,
     effort ? effortName(effort) : null,
     fast ? "Fast" : null,
@@ -105,7 +101,7 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={running}
-        title={running ? "Wait for the answer to finish to change this" : "Choose the agent and model"}
+        title={running ? "Wait for the answer to finish to change this" : "Choose the provider and model"}
       >
         <span>{label}</span>
         {harness?.experimental && <span className="tag">Experimental</span>}
@@ -115,16 +111,6 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
         <div className={`menu wide ${direction}`} role="menu" style={room ? { maxHeight: Math.min(560, room) } : undefined}>
           <div className="menu-columns">
             <div className="menu-column">
-              {!thread && agents.length > 1 && (
-                <section>
-                  <h3>Agent</h3>
-                  {agents.map((a) => (
-                    <MenuItem key={a.id} selected={a.id === agent?.id} onClick={() => chooseAgent(a.id)}>
-                      {a.name}
-                    </MenuItem>
-                  ))}
-                </section>
-              )}
               <section>
                 <h3>Provider</h3>
                 {harnesses.map((h) => (
@@ -177,11 +163,11 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
             className="menu-footer"
             onClick={() => {
               setOpen(false);
-              openSettings({ section: "agents", agentId: agent?.id ?? null });
+              openSettings({ section: "providers" });
             }}
           >
             <Icon name="settings" size={15} />
-            Edit agents
+            Provider settings
           </button>
         </div>
       )}

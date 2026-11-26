@@ -3,6 +3,20 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Agents live in the sidebar and filter the conversation list
+
+Agents sit in the left sidebar above the conversations instead of inside the pill under
+the composer. Picking an agent starts a new chat with it and filters the conversation
+list to that agent's conversations. Once there is more than one agent, an "All agents"
+toggle on the conversation list shows conversations from every agent, with each agent's
+name under its title. The pill keeps only the provider, model, reasoning level, and fast
+mode.
+
+Why: keeping the agent in the pill crowded the pill and made it hard to find one agent's
+conversations in a mixed list. Filtering by the current agent matches how people expect
+separate assistants to work, while the "All agents" toggle keeps recent chats across all
+agents one click away without adding heavy controls.
+
 ## 2026-11-25: Fast mode is off by default
 
 Agents and conversations can turn on a harness's fast mode, but it starts off, and Staf
