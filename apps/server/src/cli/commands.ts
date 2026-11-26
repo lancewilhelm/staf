@@ -269,7 +269,7 @@ export async function memory(args: string[]): Promise<number> {
       process.stdout.write(
         bold(`Memory for ${snap.agentId}`) +
           dim(
-            `  (Notes ${snap.usage.notes.used}/${snap.usage.notes.limit} chars · Profile ${snap.usage.profile.used}/${snap.usage.profile.limit} chars · Reminder every ${snap.settings.nudgeInterval || "off"} messages)\n`,
+            `  (About you ${snap.usage.profile.used}/${snap.usage.profile.limit} chars · Agent notes ${snap.usage.notes.used}/${snap.usage.notes.limit} chars · Reminder every ${snap.settings.nudgeInterval || "off"} messages)\n`,
           ),
       );
       if (snap.proposed.length > 0) {
@@ -356,7 +356,7 @@ export async function memory(args: string[]): Promise<number> {
       }
       const snap = await api.getAgentMemory(agentId);
       process.stdout.write(
-        `Notes limit: ${snap.settings.notesLimit} chars\nProfile limit: ${snap.settings.profileLimit} chars\nReminder interval: ${snap.settings.nudgeInterval} messages\n`,
+        `About you limit: ${snap.settings.profileLimit} chars\nAgent notes limit: ${snap.settings.notesLimit} chars\nReminder interval: ${snap.settings.nudgeInterval} messages\n`,
       );
       return 0;
     }

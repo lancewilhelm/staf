@@ -50,8 +50,8 @@ at the start of every conversation:
 
 | Block | Holds | Default limit |
 |---|---|---|
-| **Notes** | What the agent learned about its work and surroundings: how a task is done, where things are, what failed before | 2,200 characters (about 800 tokens) |
-| **Profile** | What the agent knows about its person: preferences, routines, people, places | 1,375 characters (about 500 tokens) |
+| **About you** (`profile`) | What the agent knows about its person: preferences, routines, people, places | 1,375 characters (about 500 tokens) |
+| **Agent notes** (`notes`) | What the agent learned about its work and surroundings: how a task is done, where things are, what failed before | 2,200 characters (about 800 tokens) |
 
 These are the Hermes defaults (`memory_char_limit` and `user_char_limit`). The limits can
 be changed per agent in the settings window. Small limits keep every message cheap and

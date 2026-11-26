@@ -23,13 +23,13 @@ import { MemoryProposalCard } from "./MemoryProposals.tsx";
 const BLOCKS: Array<{ id: MemoryBlock; title: string; hint: string; placeholder: string }> = [
   {
     id: "profile",
-    title: "Profile",
+    title: "About you",
     hint: "What this agent knows about you: preferences, routines, people, and places.",
     placeholder: "For example: Prefers morning flights and direct routes.",
   },
   {
     id: "notes",
-    title: "Notes",
+    title: "Agent notes",
     hint: "What this agent learned about its work: how tasks are done, where things live, and what to avoid.",
     placeholder: "For example: Keep the morning briefing under 2 pages.",
   },
@@ -125,7 +125,7 @@ export function MemoryPane({ agent }: { agent: AgentSummary }) {
         <form className="memory-limits-form" onSubmit={(e) => void saveLimits(e)}>
           <div className="memory-limits-grid">
             <label className="field">
-              <span>Profile limit (chars)</span>
+              <span>About you limit (chars)</span>
               <input
                 type="number"
                 min={MIN_MEMORY_LIMIT}
@@ -136,7 +136,7 @@ export function MemoryPane({ agent }: { agent: AgentSummary }) {
               />
             </label>
             <label className="field">
-              <span>Notes limit (chars)</span>
+              <span>Agent notes limit (chars)</span>
               <input
                 type="number"
                 min={MIN_MEMORY_LIMIT}

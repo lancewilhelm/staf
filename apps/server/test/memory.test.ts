@@ -386,7 +386,7 @@ describe("staf memory CLI", () => {
 
     const limits = await runCli("limits", "--notes", "3000", "--nudge", "15");
     expect(limits.code).toBe(0);
-    expect(limits.stdout).toContain("Notes limit: 3000 chars");
+    expect(limits.stdout).toContain("Agent notes limit: 3000 chars");
     expect(limits.stdout).toContain("Reminder interval: 15 messages");
 
     const removed = await runCli("rm", idPrefix!);

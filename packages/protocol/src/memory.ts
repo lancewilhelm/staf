@@ -16,5 +16,5 @@ export function isMemoryBlock(value: unknown): value is MemoryBlock {
 }
 
 export function memoryBlockLabel(block: MemoryBlock): string {
-  return block === "notes" ? "Notes" : "Profile";
+  return block === "notes" ? "Agent notes" : "About you";
 }

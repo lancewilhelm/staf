@@ -171,10 +171,10 @@ export class MemoryService implements MemoryBackend {
 
     const sections: string[] = [];
     if (profile.length > 0) {
-      sections.push(renderSection("Profile (about the person)", profile, snapshot.usage.profile.used, snapshot.usage.profile.limit));
+      sections.push(renderSection("About you (profile)", profile, snapshot.usage.profile.used, snapshot.usage.profile.limit));
     }
     if (notes.length > 0) {
-      sections.push(renderSection("Notes (agent notes)", notes, snapshot.usage.notes.used, snapshot.usage.notes.limit));
+      sections.push(renderSection("Agent notes (notes)", notes, snapshot.usage.notes.used, snapshot.usage.notes.limit));
     }
     return [
       "Saved memory for this agent (captured when this conversation started; use the memory tool to update it for future conversations):",
