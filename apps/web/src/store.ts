@@ -47,7 +47,10 @@ export interface Choice {
 
 export type ModelList = { status: "loading" } | { status: "ready"; list: ModelInfo[] } | { status: "error"; error: string };
 
-export type SettingsView = { section: "agents"; agentId: string | null } | { section: "providers" };
+export type SettingsView =
+  | { section: "agents"; agentId: string | null }
+  | { section: "providers" }
+  | { section: "appearance" };
 
 export const api = new StafClient(location.origin);
 

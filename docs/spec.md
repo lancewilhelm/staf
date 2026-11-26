@@ -205,6 +205,14 @@ Each slice is used live before the next one starts.
        transcript (Codex and Antigravity in `~/.staf/harness/`, Claude in
        `~/.claude/projects/`).
      - **Harness memory off,** as listed in [memory.md](memory.md).
+     - **Light and dark themes.** Settings → Appearance picks System, Light, or Dark,
+       saved in each browser. Colors are CSS variables that `data-theme` on `<html>`
+       selects, so richer themes can be added later as more values.
+   - 1e: agents in the sidebar. Planned.
+     - The sidebar lists the agents, as in Grok and Hermes. Picking one starts a new chat
+       with it, and its conversations are easy to find. The pill keeps only the provider,
+       model, reasoning level, and fast mode, which makes it less crowded.
+     - On the phone, the agents sit in the same slide-out panel as the conversations.
 2. **Jobs and the inbox.** Schedules, job runs, inbox items with attachments, and a port of the `morning-intel` skill from Hermes. Jobs run on Codex or
    Claude; Staf refuses to schedule a job on Antigravity for now (see
    [decisions.md](decisions.md)).

@@ -15,6 +15,7 @@ import {
 } from "../store.ts";
 import { FastSwitch } from "./ChatPill.tsx";
 import { Icon } from "./Icon.tsx";
+import { setThemeSetting, type ThemeSetting, themeSetting } from "../theme.ts";
 
 /** The settings window: agents and providers. */
 export function Settings({ view }: { view: SettingsView }) {
@@ -56,9 +57,19 @@ export function Settings({ view }: { view: SettingsView }) {
               <Icon name="plug" size={16} />
               Providers
             </button>
+            <button
+              type="button"
+              className={view.section === "appearance" ? "active" : ""}
+              onClick={() => openSettings({ section: "appearance" })}
+            >
+              <Icon name="appearance" size={16} />
+              Appearance
+            </button>
           </nav>
           <div className="settings-pane">
-            {view.section === "agents" ? <AgentsPane selected={view.agentId} /> : <ProvidersPane />}
+            {view.section === "agents" && <AgentsPane selected={view.agentId} />}
+            {view.section === "providers" && <ProvidersPane />}
+            {view.section === "appearance" && <AppearancePane />}
           </div>
         </div>
       </div>
@@ -309,7 +320,12 @@ function ProvidersPane() {
 }
 
 function ProviderCard({ harness }: { harness: HarnessInfo }) {
-  const state = !harness.ready ? (harness.signedIn === false ? "Not signed in" : "Not ready") : "Ready";
+  // Stoplight: green when ready, yellow when a sign-in would fix it, red otherwise.
+  const status = harness.ready
+    ? { label: "Ready", tone: "ok" }
+    : harness.signedIn === false
+      ? { label: "Not signed in", tone: "warn" }
+      : { label: "Not ready", tone: "bad" };
   return (
     <section className="provider">
       <header>
@@ -320,7 +336,7 @@ function ProviderCard({ harness }: { harness: HarnessInfo }) {
           </h3>
           <p className="provider-sub">Runs through {harness.program}</p>
         </div>
-        <span className={`status ${harness.ready ? "ok" : "bad"}`}>{state}</span>
+        <span className={`status ${status.tone}`}>{status.label}</span>
       </header>
       {harness.note && <p>{harness.note}</p>}
       {!harness.ready && harness.detail && <p className="field-note error">{harness.detail}</p>}
@@ -338,5 +354,42 @@ function ProviderCard({ harness }: { harness: HarnessInfo }) {
         </p>
       )}
     </section>
+  );
+}
+
+// Appearance
+
+const THEMES: Array<{ id: ThemeSetting; label: string; hint: string }> = [
+  { id: "system", label: "System", hint: "Follows this device's light or dark setting" },
+  { id: "light", label: "Light", hint: "Always light" },
+  { id: "dark", label: "Dark", hint: "Always dark" },
+];
+
+function AppearancePane() {
+  const [setting, setSetting] = useState<ThemeSetting>(themeSetting);
+  return (
+    <div className="appearance-pane">
+      <h3>Theme</h3>
+      <div className="theme-options" role="radiogroup" aria-label="Theme">
+        {THEMES.map((theme) => (
+          <button
+            key={theme.id}
+            type="button"
+            role="radio"
+            aria-checked={setting === theme.id}
+            className={`theme-option${setting === theme.id ? " selected" : ""}`}
+            onClick={() => {
+              setThemeSetting(theme.id);
+              setSetting(theme.id);
+            }}
+          >
+            <span className={`theme-swatch ${theme.id}`} aria-hidden="true" />
+            <span className="theme-label">{theme.label}</span>
+            <span className="theme-hint">{theme.hint}</span>
+          </button>
+        ))}
+      </div>
+      <p className="field-note">The theme is saved in this browser, so each device can have its own.</p>
+    </div>
   );
 }

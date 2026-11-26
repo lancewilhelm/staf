@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f7f7f5;
   --surface: #ffffff;
   --sidebar: #efefec;
@@ -18,34 +18,38 @@
   --warn-text: #7a5200;
   --error-bg: #fdecec;
   --error-text: #9b1c1c;
+  --ok-bg: #e9f5ed;
+  --ok-text: #1d6b3a;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 24px rgba(0, 0, 0, 0.06);
   --radius: 22px;
   --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #151515;
-    --surface: #1f1f1f;
-    --sidebar: #1b1b1b;
-    --text: #ececea;
-    --muted: #a3a39f;
-    --faint: #75756f;
-    --line: #2c2c2b;
-    --hover: rgba(255, 255, 255, 0.05);
-    --active: rgba(255, 255, 255, 0.09);
-    --accent: #ececea;
-    --accent-text: #151515;
-    --user: #262626;
-    --link: #8ab4ff;
-    --code: rgba(255, 255, 255, 0.07);
-    --warn-bg: #2d2412;
-    --warn-text: #f0c46a;
-    --error-bg: #301818;
-    --error-text: #ff9c9c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.35);
-  }
+/* index.html and theme.ts set data-theme from the saved setting or the system's. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151515;
+  --surface: #1f1f1f;
+  --sidebar: #1b1b1b;
+  --text: #ececea;
+  --muted: #a3a39f;
+  --faint: #75756f;
+  --line: #2c2c2b;
+  --hover: rgba(255, 255, 255, 0.05);
+  --active: rgba(255, 255, 255, 0.09);
+  --accent: #ececea;
+  --accent-text: #151515;
+  --user: #262626;
+  --link: #8ab4ff;
+  --code: rgba(255, 255, 255, 0.07);
+  --warn-bg: #2d2412;
+  --warn-text: #f0c46a;
+  --error-bg: #301818;
+  --error-text: #ff9c9c;
+  --ok-bg: #16261b;
+  --ok-text: #86d39f;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -1282,6 +1286,76 @@ button.link {
   padding: 18px 20px;
 }
 
+/* Appearance */
+
+.appearance-pane {
+  padding: 18px 20px;
+}
+
+.appearance-pane h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.theme-option:hover {
+  background: var(--hover);
+}
+
+.theme-option.selected {
+  border-color: var(--link);
+  box-shadow: 0 0 0 1px var(--link);
+}
+
+/* Small previews in each theme's own colors, whatever the current theme is. */
+.theme-swatch {
+  width: 100%;
+  height: 54px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+}
+
+.theme-swatch.light {
+  background: linear-gradient(#ffffff, #ffffff) 12px 12px / 60% 10px no-repeat, #f7f7f5;
+}
+
+.theme-swatch.dark {
+  background: linear-gradient(#2a2a2a, #2a2a2a) 12px 12px / 60% 10px no-repeat, #151515;
+}
+
+.theme-swatch.system {
+  background: linear-gradient(105deg, #f7f7f5 50%, #151515 50%);
+}
+
+.theme-label {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.theme-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .provider {
   padding: 14px 16px;
   border: 1px solid var(--line);
@@ -1320,9 +1394,26 @@ button.link {
   font-weight: 550;
 }
 
+/* Stoplight colors: ready, needs a sign-in, not working. */
+.status::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+}
+
 .status.ok {
-  background: var(--hover);
-  color: var(--muted);
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
+.status.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
 }
 
 .status.bad {
@@ -1468,8 +1559,17 @@ button.link {
   }
 
   .agent-form,
-  .providers-pane {
+  .providers-pane,
+  .appearance-pane {
     padding: 14px 16px 16px;
+  }
+
+  .theme-options {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-swatch {
+    height: 36px;
   }
 
   .field-row {
