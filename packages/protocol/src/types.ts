@@ -20,6 +20,8 @@ export interface ThreadSummary {
   fast: boolean;
   /** Whether this thread was started manually or by a scheduled task. */
   source: ThreadSource;
+  /** The scheduled task that started this thread, if any. */
+  taskId: string | null;
   /** Unix time in milliseconds when this thread was settled, or null while active. */
   settledAt: number | null;
   status: ThreadStatus;
@@ -221,6 +223,69 @@ export interface UserPreferences {
 
 export type UpdatePreferencesRequest = Partial<UserPreferences>;
 
+export type TaskSchedule =
+  | {
+      type: "daily";
+      /** 24-hour local time in HH:MM format, such as "05:30". */
+      timeOfDay: string;
+      /** Days of the week (0 = Sunday .. 6 = Saturday). Empty or omitted means every day. */
+      weekdays?: number[];
+    }
+  | {
+      type: "interval";
+      /** Minutes between runs (5 to 10080). */
+      everyMinutes: number;
+    }
+  | {
+      type: "once";
+      /** Unix time in milliseconds for a single run. */
+      runAt: number;
+    };
+
+export type ScheduledTaskRunStatus = "running" | "complete" | "failed" | "interrupted";
+
+export interface ScheduledTask {
+  id: string;
+  agentId: string;
+  name: string;
+  prompt: string;
+  schedule: TaskSchedule;
+  enabled: boolean;
+  /** Optional provider override; null uses the agent's default harness. */
+  harness: string | null;
+  /** Optional model override; null uses the provider's or agent's default. */
+  model: string | null;
+  /** Optional reasoning level override. */
+  effort: string | null;
+  /** Fast mode is off by default so scheduled tasks do not silently spend extra credits. */
+  fast: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastRunThreadId: string | null;
+  lastRunStatus: ScheduledTaskRunStatus | null;
+  lastRunError: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateScheduledTaskRequest {
+  name: string;
+  prompt: string;
+  schedule: TaskSchedule;
+  enabled?: boolean;
+  harness?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  fast?: boolean;
+}
+
+export type UpdateScheduledTaskRequest = Partial<CreateScheduledTaskRequest>;
+
+export interface RunScheduledTaskResponse {
+  task: ScheduledTask;
+  thread: ThreadSummary;
+}
+
 /** Events that the host streams to clients over server-sent events. */
 export type StreamEvent =
   | { type: "ready" }
@@ -238,7 +303,9 @@ export type StreamEvent =
   /** A harness signed in or out. */
   | { type: "harnesses.changed" }
   /** A person's preferences changed. */
-  | { type: "preferences.changed"; preferences: UserPreferences };
+  | { type: "preferences.changed"; preferences: UserPreferences }
+  /** Scheduled tasks for an agent were added, changed, removed, or ran. */
+  | { type: "tasks.changed"; agentId: string };
 
 export interface ApiErrorBody {
   error: string;

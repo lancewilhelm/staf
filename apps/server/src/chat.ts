@@ -60,7 +60,15 @@ export class ChatService {
 
   createThread(
     agentId = DEFAULT_AGENT_ID,
-    choice: { harness?: string; model?: string | null; effort?: string | null; fast?: boolean; source?: ThreadSource } = {},
+    choice: {
+      title?: string;
+      harness?: string;
+      model?: string | null;
+      effort?: string | null;
+      fast?: boolean;
+      source?: ThreadSource;
+      taskId?: string | null;
+    } = {},
   ): ThreadSummary {
     const agent = this.loadAgent(agentId);
     if (!agent) throw new ChatError(404, `There is no agent named "${agentId}".`);
@@ -69,13 +77,14 @@ export class ChatService {
     // A harness picked for this conversation starts on its own defaults.
     const other = choice.harness !== undefined && choice.harness !== agent.harness;
     const thread = this.store.createThread({
-      title: "New chat",
+      title: choice.title?.trim() || "New chat",
       agentId: agent.id,
       harness,
       model: choice.model !== undefined ? choice.model : other ? null : agent.model,
       effort: choice.effort !== undefined ? choice.effort : other ? null : agent.effort,
       fast: choice.fast ?? (other ? false : agent.fast),
       source: choice.source ?? "chat",
+      taskId: choice.taskId ?? null,
     });
     const summary = publicThread(thread);
     this.bus.publish({ type: "thread.upserted", thread: summary });
@@ -289,7 +298,7 @@ export class ChatService {
       status: "running",
       settledAt: null,
       touch: true,
-      ...(isFirst ? { title: titleFrom(text || pendingAttachments[0]!.name) } : {}),
+      ...(isFirst && thread.title === "New chat" ? { title: titleFrom(text || pendingAttachments[0]!.name) } : {}),
     })!;
     this.bus.publish({ type: "message.created", message: userMessage });
     this.bus.publish({ type: "message.created", message: assistantMessage });
@@ -325,6 +334,11 @@ export class ChatService {
       if (error instanceof AgentConfigError) throw new ChatError(409, error.message);
       throw error;
     }
+  }
+
+  /** Waits for one thread's current run to finish, if it is running. */
+  async waitForThread(threadId: string): Promise<void> {
+    await this.running.get(threadId)?.done;
   }
 
   /** Waits for every running answer to end. Used by tests and shutdown. */

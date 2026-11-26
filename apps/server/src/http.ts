@@ -3,10 +3,12 @@ import {
   isSidebarMode,
   isThemePreference,
   type AgentSummary,
+  type CreateScheduledTaskRequest,
   type HealthInfo,
   type StreamEvent,
   type ThreadSource,
   type UpdatePreferencesRequest,
+  type UpdateScheduledTaskRequest,
   type UpdateThreadRequest,
 } from "@staf/protocol";
 import type { HTMLBundle, Server } from "bun";
@@ -25,6 +27,7 @@ import { ChatError, type ChatService } from "./chat.ts";
 import { VERSION } from "./config.ts";
 import { CodexAdapter } from "./harness/codex/adapter.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
+import type { Scheduler } from "./scheduler.ts";
 import type { Store } from "./store.ts";
 
 export interface HttpOptions {
@@ -32,6 +35,7 @@ export interface HttpOptions {
   port: number;
   store: Store;
   chat: ChatService;
+  scheduler: Scheduler;
   agents: Agents;
   bus: EventBus;
   harnesses: Map<string, HarnessAdapter>;
@@ -118,10 +122,31 @@ export function startHttp(options: HttpOptions): Server<undefined> {
         if (id === DEFAULT_AGENT_ID) throw new ChatError(400, "The default agent cannot be deleted.");
         if (!options.agents.get(id)) throw new AgentNotFoundError(id);
         await chat.deleteThreadsOf(id);
+        options.scheduler.deleteTasksForAgent(id);
         options.agents.remove(id);
         bus.publish({ type: "agents.changed" });
         return new Response(null, { status: 204 });
       }),
+    },
+    "/api/agents/:id/tasks": {
+      GET: api((req) => json(options.scheduler.listTasks(req.params.id!))),
+      POST: api(async (req) => {
+        const input = readCreateTask(await readJson(req));
+        return json(options.scheduler.createTask(req.params.id!, input), 201);
+      }),
+    },
+    "/api/tasks/:id": {
+      PATCH: api(async (req) => {
+        const input = readUpdateTask(await readJson(req));
+        return json(options.scheduler.updateTask(req.params.id!, input));
+      }),
+      DELETE: api((req) => {
+        options.scheduler.deleteTask(req.params.id!);
+        return new Response(null, { status: 204 });
+      }),
+    },
+    "/api/tasks/:id/run": {
+      POST: api((req) => json(options.scheduler.runNow(req.params.id!), 201)),
     },
     "/api/harnesses/:id/models": {
       GET: api(async (req) => {
@@ -321,6 +346,55 @@ function eventStream(req: Request, server: Server<undefined>, bus: EventBus): Re
       connection: "keep-alive",
     },
   });
+}
+
+function readCreateTask(body: Record<string, unknown>): CreateScheduledTaskRequest {
+  if (typeof body.name !== "string") throw new ChatError(400, "Give the scheduled task a name.");
+  if (typeof body.prompt !== "string") throw new ChatError(400, "Write a prompt for the scheduled task.");
+  const patch = readUpdateTask(body);
+  if (patch.schedule === undefined) throw new ChatError(400, "Include a schedule for the task.");
+  return {
+    name: body.name,
+    prompt: body.prompt,
+    schedule: patch.schedule,
+    ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+    ...(patch.harness !== undefined ? { harness: patch.harness } : {}),
+    ...(patch.model !== undefined ? { model: patch.model } : {}),
+    ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
+    ...(patch.fast !== undefined ? { fast: patch.fast } : {}),
+  };
+}
+
+function readUpdateTask(body: Record<string, unknown>): UpdateScheduledTaskRequest {
+  const patch: UpdateScheduledTaskRequest = {};
+  if (body.name !== undefined) {
+    if (typeof body.name !== "string") throw new ChatError(400, "The task name must be text.");
+    patch.name = body.name;
+  }
+  if (body.prompt !== undefined) {
+    if (typeof body.prompt !== "string") throw new ChatError(400, "The task prompt must be text.");
+    patch.prompt = body.prompt;
+  }
+  if (body.schedule !== undefined) {
+    patch.schedule = body.schedule as UpdateScheduledTaskRequest["schedule"];
+  }
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== "boolean") throw new ChatError(400, "Enabled must be true or false.");
+    patch.enabled = body.enabled;
+  }
+  if (body.harness !== undefined) {
+    if (body.harness !== null && typeof body.harness !== "string") {
+      throw new ChatError(400, "The harness must be text or null.");
+    }
+    patch.harness = body.harness;
+  }
+  const model = readModel(body.model);
+  if (model !== undefined) patch.model = model;
+  const effort = readEffort(body.effort);
+  if (effort !== undefined) patch.effort = effort;
+  const fast = readFast(body.fast);
+  if (fast !== undefined) patch.fast = fast;
+  return patch;
 }
 
 function readSource(value: unknown): ThreadSource | undefined {

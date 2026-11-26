@@ -10,6 +10,7 @@ import { CodexAdapter } from "./harness/codex/adapter.ts";
 import { FakeHarness } from "./harness/fake.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
 import { startHttp } from "./http.ts";
+import { Scheduler } from "./scheduler.ts";
 import { Store } from "./store.ts";
 
 export interface AppOptions {
@@ -27,6 +28,7 @@ export interface AppOptions {
 export interface App {
   url: URL;
   chat: ChatService;
+  scheduler: Scheduler;
   store: Store;
   stop(): Promise<void>;
 }
@@ -64,12 +66,15 @@ export function createApp(options: AppOptions): App {
     paths.attachments,
     options.harnessOverride ?? null,
   );
+  const scheduler = new Scheduler(store, agents, chat, bus, options.harnessOverride ?? null);
+  scheduler.start();
 
   const server = startHttp({
     hostname: options.hostname,
     port: options.port,
     store,
     chat,
+    scheduler,
     agents,
     bus,
     harnesses,
@@ -80,9 +85,11 @@ export function createApp(options: AppOptions): App {
   return {
     url: server.url,
     chat,
+    scheduler,
     store,
     async stop() {
       await chat.stopAll();
+      await scheduler.stop();
       await server.stop(true);
       await Promise.all(list.map((harness) => harness.close()));
       store.close();

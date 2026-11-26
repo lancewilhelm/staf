@@ -3,6 +3,18 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Scheduled tasks run on Codex or Claude, and missed recurring runs skip ahead on restart
+
+Scheduled tasks can run on Codex or Claude (with fast mode off by default), and Staf
+refuses to schedule a task on Antigravity even when an agent's default harness is
+Antigravity. On startup, any recurring task whose scheduled time passed more than five
+minutes ago advances to its next future slot instead of firing immediately.
+
+Why: scheduled runs execute unattended, so they should stay on the stable harnesses
+rather than the experimental Antigravity adapter. Skipping stale recurring slots on
+restart prevents a laptop that wakes from sleep from firing a burst of outdated jobs,
+while a five-minute grace window still catches tasks missed during a brief server restart.
+
 ## 2026-11-25: Scheduled task runs are threads, and the Inbox is a sidebar mode
 
 Every chat and every scheduled task run is stored as a **thread** (with a `source` field

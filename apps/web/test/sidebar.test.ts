@@ -19,6 +19,7 @@ function makeThread(overrides: Partial<ThreadSummary> & { id: string }): ThreadS
     effort: null,
     fast: false,
     source: "chat",
+    taskId: null,
     settledAt: null,
     status: "idle",
     createdAt: 0,

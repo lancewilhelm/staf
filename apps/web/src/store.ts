@@ -3,9 +3,11 @@ import {
   type Activity,
   type AgentInput,
   type AgentSummary,
+  type CreateScheduledTaskRequest,
   type HealthInfo,
   type Message,
   type ModelInfo,
+  type ScheduledTask,
   StafClient,
   type StreamEvent,
   type ThreadSummary,
@@ -42,6 +44,8 @@ export interface State {
   draft: Partial<Choice>;
   /** Model lists by harness, loaded when someone opens a picker. */
   models: Record<string, ModelList>;
+  /** Scheduled tasks loaded per agent ID. */
+  tasks: Record<string, ScheduledTask[]>;
   preferences: UserPreferences;
   settings: SettingsView | null;
   agentPanel: AgentPanelView | null;
@@ -64,7 +68,7 @@ export type SettingsView =
   | { section: "providers" }
   | { section: "appearance" };
 
-export type AgentPanelSection = "profile";
+export type AgentPanelSection = "profile" | "tasks";
 
 export type AgentPanelView =
   | { mode: "create" }
@@ -118,6 +122,7 @@ let state: State = {
   agentId: readSavedAgent(),
   draft: lastChoice(readSavedAgent()),
   models: {},
+  tasks: {},
   preferences: {
     ...DEFAULT_PREFERENCES,
     theme: initialPreferences.theme,
@@ -137,11 +142,17 @@ function set(patch: Partial<State> | ((current: State) => Partial<State>)): void
 }
 
 const NO_HARNESSES: HealthInfo["harnesses"] = [];
+const NO_TASKS: ScheduledTask[] = [];
 
 /** The harnesses from the last health check. The fallback is one shared array, because a
  *  new array on every read makes useSyncExternalStore render forever. */
 export function useHarnesses(): HealthInfo["harnesses"] {
   return useStore((s) => s.health?.harnesses ?? NO_HARNESSES);
+}
+
+/** Scheduled tasks for one agent, using a shared empty array fallback to keep selector identity stable. */
+export function useAgentTasks(agentId: string): ScheduledTask[] {
+  return useStore((s) => s.tasks[agentId] ?? NO_TASKS);
 }
 
 export function useStore<T>(select: (state: State) => T): T {
@@ -379,6 +390,63 @@ export async function removeAgent(id: string): Promise<boolean> {
   }
 }
 
+export async function loadAgentTasks(agentId: string): Promise<void> {
+  try {
+    const list = await api.listScheduledTasks(agentId);
+    set((current) => ({ tasks: { ...current.tasks, [agentId]: list } }));
+  } catch (error) {
+    report(error);
+  }
+}
+
+export async function saveScheduledTask(
+  agentId: string,
+  taskId: string | null,
+  input: CreateScheduledTaskRequest,
+): Promise<ScheduledTask | null> {
+  try {
+    const saved = taskId
+      ? await api.updateScheduledTask(taskId, input)
+      : await api.createScheduledTask(agentId, input);
+    await loadAgentTasks(agentId);
+    return saved;
+  } catch (error) {
+    report(error);
+    return null;
+  }
+}
+
+export async function toggleScheduledTask(task: ScheduledTask): Promise<void> {
+  try {
+    await api.updateScheduledTask(task.id, { enabled: !task.enabled });
+    await loadAgentTasks(task.agentId);
+  } catch (error) {
+    report(error);
+  }
+}
+
+export async function removeScheduledTask(task: ScheduledTask): Promise<boolean> {
+  try {
+    await api.deleteScheduledTask(task.id);
+    await loadAgentTasks(task.agentId);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function runScheduledTaskNow(task: ScheduledTask): Promise<ThreadSummary | null> {
+  try {
+    const result = await api.runScheduledTask(task.id);
+    await loadAgentTasks(task.agentId);
+    return result.thread;
+  } catch (error) {
+    report(error);
+    return null;
+  }
+}
+
 export async function signIn(harness: string): Promise<void> {
   try {
     const { url } = await api.startLogin(harness);
@@ -574,6 +642,14 @@ function apply(event: StreamEvent): void {
     }
     case "preferences.changed":
       applyServerPreferences(event.preferences);
+      return;
+    case "tasks.changed":
+      if (
+        event.agentId in state.tasks ||
+        (state.agentPanel?.mode === "edit" && state.agentPanel.agentId === event.agentId)
+      ) {
+        void loadAgentTasks(event.agentId);
+      }
       return;
     case "message.completed":
       set((current) => ({

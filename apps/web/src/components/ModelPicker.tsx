@@ -19,6 +19,8 @@ export function ModelPickerPanel({
   harnesses,
   models,
   allowUnreadyProviders = false,
+  disabledProviders,
+  disabledProviderReason,
   switching = false,
   onChange,
   footer,
@@ -28,6 +30,10 @@ export function ModelPickerPanel({
   models: Record<string, ModelList>;
   /** True in agent settings so defaults can be picked even before signing in. */
   allowUnreadyProviders?: boolean;
+  /** Provider IDs that cannot be selected in this context (e.g. Antigravity for scheduled tasks). */
+  disabledProviders?: ReadonlySet<string>;
+  /** Short label shown next to blocked providers. */
+  disabledProviderReason?: string;
   /** True inside an existing thread to explain how switching providers hands off history. */
   switching?: boolean;
   onChange: (change: Partial<ModelPickerValue>) => void;
@@ -54,23 +60,33 @@ export function ModelPickerPanel({
         <div className="menu-column">
           <section>
             <h3>Provider</h3>
-            {harnesses.map((h) => (
-              <MenuItem
-                key={h.id}
-                selected={h.id === value.harness}
-                disabled={!allowUnreadyProviders && !h.ready}
-                hint={!h.ready ? (h.detail ?? "Not ready") : undefined}
-                onClick={() => {
-                  if (h.id !== value.harness) {
-                    onChange({ harness: h.id, model: null, effort: null, fast: false });
-                  }
-                }}
-              >
-                {h.label}
-                {h.experimental && <span className="tag">Experimental</span>}
-                {allowUnreadyProviders && !h.ready && <span className="muted"> · Not ready</span>}
-              </MenuItem>
-            ))}
+            {harnesses.map((h) => {
+              const blocked = disabledProviders?.has(h.id) ?? false;
+              const disabled = blocked || (!allowUnreadyProviders && !h.ready);
+              const hint = blocked
+                ? (disabledProviderReason ?? "Not available here")
+                : !h.ready
+                  ? (h.detail ?? "Not ready")
+                  : undefined;
+              return (
+                <MenuItem
+                  key={h.id}
+                  selected={h.id === value.harness}
+                  disabled={disabled}
+                  hint={hint}
+                  onClick={() => {
+                    if (h.id !== value.harness) {
+                      onChange({ harness: h.id, model: null, effort: null, fast: false });
+                    }
+                  }}
+                >
+                  {h.label}
+                  {h.experimental && <span className="tag">Experimental</span>}
+                  {!blocked && allowUnreadyProviders && !h.ready && <span className="muted"> · Not ready</span>}
+                  {blocked && <span className="toggle-note">{disabledProviderReason ?? "Not available here"}</span>}
+                </MenuItem>
+              );
+            })}
           </section>
           <section className="models">
             <h3>Model</h3>

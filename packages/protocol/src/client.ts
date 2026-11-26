@@ -5,15 +5,19 @@ import type {
   AgentSummary,
   ApiErrorBody,
   Attachment,
+  CreateScheduledTaskRequest,
   CreateThreadRequest,
   HealthInfo,
   LoginStart,
   ModelInfo,
+  RunScheduledTaskResponse,
+  ScheduledTask,
   SendMessageResponse,
   StreamEvent,
   ThreadDetail,
   ThreadSummary,
   UpdatePreferencesRequest,
+  UpdateScheduledTaskRequest,
   UpdateThreadRequest,
   UserPreferences,
 } from "./types.ts";
@@ -66,6 +70,26 @@ export class StafClient {
 
   deleteAgent(id: string): Promise<void> {
     return this.request("DELETE", `/api/agents/${encodeURIComponent(id)}`);
+  }
+
+  listScheduledTasks(agentId: string): Promise<ScheduledTask[]> {
+    return this.request("GET", `/api/agents/${encodeURIComponent(agentId)}/tasks`);
+  }
+
+  createScheduledTask(agentId: string, input: CreateScheduledTaskRequest): Promise<ScheduledTask> {
+    return this.request("POST", `/api/agents/${encodeURIComponent(agentId)}/tasks`, input);
+  }
+
+  updateScheduledTask(id: string, input: UpdateScheduledTaskRequest): Promise<ScheduledTask> {
+    return this.request("PATCH", `/api/tasks/${encodeURIComponent(id)}`, input);
+  }
+
+  deleteScheduledTask(id: string): Promise<void> {
+    return this.request("DELETE", `/api/tasks/${encodeURIComponent(id)}`);
+  }
+
+  runScheduledTask(id: string): Promise<RunScheduledTaskResponse> {
+    return this.request("POST", `/api/tasks/${encodeURIComponent(id)}/run`);
   }
 
   listModels(harness: string): Promise<ModelInfo[]> {

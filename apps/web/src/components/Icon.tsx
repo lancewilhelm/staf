@@ -30,6 +30,8 @@ const paths = {
     "M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l9.2-9.2a3.3 3.3 0 0 1 4.6 4.6l-9.2 9.2a1.6 1.6 0 0 1-2.3-2.3L16 7",
   download: "M12 4v12M7 11l5 5 5-5M5 20h14",
   external: "M14 5h5v5M10 14L19 5M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5",
+  play: "M8 5.5v13l11-6.5z",
+  back: "M15 6l-6 6 6 6",
 } as const;
 
 export type IconName = keyof typeof paths;

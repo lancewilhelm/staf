@@ -156,9 +156,21 @@ staf ask --agent travel "Find a hotel in Lisbon for December 12."
 Staf creates the `workspace/` folder the first time the agent runs. Changes to
 `agent.json` and `AGENTS.md` apply to the next message; you do not need to restart Staf.
 
-**Deleting an agent** deletes its conversations, including the harnesses' copies, and
-moves its folder, with its workspace, to `~/.staf/trash/agents/`. The default agent cannot
-be deleted.
+**Deleting an agent** deletes its conversations and scheduled tasks, including the
+harnesses' copies, and moves its folder, with its workspace, to `~/.staf/trash/agents/`.
+The default agent cannot be deleted.
+
+## Scheduled tasks
+
+Open an agent's panel from the sidebar and switch to the **Scheduled tasks** tab to create,
+edit, pause, delete, or run scheduled tasks for that agent. A task can run daily (or on
+chosen weekdays) at a local time of day, on a fixed minute or hour interval, or once at a
+chosen date and time.
+
+Each run creates a new thread marked with a clock icon so that it stands apart from manual
+chats and can be settled or replied to directly. Scheduled tasks run on ChatGPT (Codex) or
+Claude; Staf refuses to schedule a task on Gemini (Antigravity) for now. Fast mode starts
+off on scheduled tasks so that automated runs do not silently spend extra usage.
 
 ## Picking an agent and choosing a provider or model
 

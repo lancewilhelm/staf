@@ -9,6 +9,9 @@ import {
   type Message,
   type MessageRole,
   type MessageStatus,
+  type ScheduledTask,
+  type ScheduledTaskRunStatus,
+  type TaskSchedule,
   type ThreadSource,
   type ThreadStatus,
   type ThreadSummary,
@@ -16,7 +19,7 @@ import {
   type UserPreferences,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const DEFAULT_PERSON_ID = "default";
 
 interface ThreadRow {
@@ -28,9 +31,30 @@ interface ThreadRow {
   effort: string | null;
   fast: number;
   source: ThreadSource;
+  task_id: string | null;
   settled_at: number | null;
   session_id: string | null;
   status: ThreadStatus;
+  created_at: number;
+  updated_at: number;
+}
+
+interface ScheduledTaskRow {
+  id: string;
+  agent_id: string;
+  name: string;
+  prompt: string;
+  schedule: string;
+  enabled: number;
+  harness: string | null;
+  model: string | null;
+  effort: string | null;
+  fast: number;
+  next_run_at: number | null;
+  last_run_at: number | null;
+  last_run_thread_id: string | null;
+  last_run_status: ScheduledTaskRunStatus | null;
+  last_run_error: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -109,6 +133,36 @@ export class Store {
     if (version < 3) this.migrateToV3();
     if (version < 4) this.migrateToV4();
     if (version < 5) this.migrateToV5();
+    if (version < 6) this.migrateToV6();
+  }
+
+  private migrateToV6(): void {
+    this.db.transaction(() => {
+      this.db.run("ALTER TABLE threads ADD COLUMN task_id TEXT");
+      this.db.run(`
+        CREATE TABLE scheduled_tasks (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          schedule TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          harness TEXT,
+          model TEXT,
+          effort TEXT,
+          fast INTEGER NOT NULL DEFAULT 0,
+          next_run_at INTEGER,
+          last_run_at INTEGER,
+          last_run_thread_id TEXT,
+          last_run_status TEXT,
+          last_run_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`);
+      this.db.run("CREATE INDEX scheduled_tasks_by_agent ON scheduled_tasks(agent_id, created_at)");
+      this.db.run("CREATE INDEX scheduled_tasks_next_run ON scheduled_tasks(enabled, next_run_at)");
+      this.db.run("PRAGMA user_version = 6");
+    })();
   }
 
   private migrateToV5(): void {
@@ -220,6 +274,13 @@ export class Store {
       )
       .run({ now });
     this.db.query("UPDATE threads SET status = 'idle' WHERE status = 'running'").run();
+    this.db
+      .query(
+        `UPDATE scheduled_tasks SET last_run_status = 'interrupted',
+           last_run_error = COALESCE(last_run_error, 'Staf restarted before this run finished.')
+         WHERE last_run_status = 'running'`,
+      )
+      .run();
     return changed.changes;
   }
 
@@ -231,6 +292,7 @@ export class Store {
     effort: string | null;
     fast: boolean;
     source?: ThreadSource;
+    taskId?: string | null;
   }): StoredThread {
     const now = Date.now();
     const thread: StoredThread = {
@@ -242,6 +304,7 @@ export class Store {
       effort: input.effort,
       fast: input.fast,
       source: input.source ?? "chat",
+      taskId: input.taskId ?? null,
       settledAt: null,
       sessionId: null,
       status: "idle",
@@ -250,8 +313,8 @@ export class Store {
     };
     this.db
       .query(
-        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, settled_at, session_id, status, created_at, updated_at)
-         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, NULL, NULL, $status, $createdAt, $updatedAt)`,
+        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, task_id, settled_at, session_id, status, created_at, updated_at)
+         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, $taskId, NULL, NULL, $status, $createdAt, $updatedAt)`,
       )
       .run({
         id: thread.id,
@@ -262,6 +325,7 @@ export class Store {
         effort: thread.effort,
         fast: thread.fast ? 1 : 0,
         source: thread.source,
+        taskId: thread.taskId,
         status: thread.status,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
@@ -354,6 +418,9 @@ export class Store {
   }
 
   deleteThread(id: string): boolean {
+    this.db
+      .query("UPDATE scheduled_tasks SET last_run_thread_id = NULL WHERE last_run_thread_id = $id")
+      .run({ id });
     return this.db.query("DELETE FROM threads WHERE id = $id").run({ id }).changes > 0;
   }
 
@@ -523,6 +590,167 @@ export class Store {
     return rows.map(toAttachment);
   }
 
+  createScheduledTask(input: {
+    agentId: string;
+    name: string;
+    prompt: string;
+    schedule: TaskSchedule;
+    enabled: boolean;
+    harness: string | null;
+    model: string | null;
+    effort: string | null;
+    fast: boolean;
+    nextRunAt: number | null;
+  }): ScheduledTask {
+    const now = Date.now();
+    const task: ScheduledTask = {
+      id: crypto.randomUUID(),
+      agentId: input.agentId,
+      name: input.name,
+      prompt: input.prompt,
+      schedule: input.schedule,
+      enabled: input.enabled,
+      harness: input.harness,
+      model: input.model,
+      effort: input.effort,
+      fast: input.fast,
+      nextRunAt: input.nextRunAt,
+      lastRunAt: null,
+      lastRunThreadId: null,
+      lastRunStatus: null,
+      lastRunError: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db
+      .query(
+        `INSERT INTO scheduled_tasks (
+           id, agent_id, name, prompt, schedule, enabled, harness, model, effort, fast,
+           next_run_at, last_run_at, last_run_thread_id, last_run_status, last_run_error, created_at, updated_at
+         ) VALUES (
+           $id, $agentId, $name, $prompt, $schedule, $enabled, $harness, $model, $effort, $fast,
+           $nextRunAt, NULL, NULL, NULL, NULL, $createdAt, $updatedAt
+         )`,
+      )
+      .run({
+        id: task.id,
+        agentId: task.agentId,
+        name: task.name,
+        prompt: task.prompt,
+        schedule: JSON.stringify(task.schedule),
+        enabled: task.enabled ? 1 : 0,
+        harness: task.harness,
+        model: task.model,
+        effort: task.effort,
+        fast: task.fast ? 1 : 0,
+        nextRunAt: task.nextRunAt,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      });
+    return task;
+  }
+
+  getScheduledTask(id: string): ScheduledTask | null {
+    const row = this.db.query("SELECT * FROM scheduled_tasks WHERE id = $id").get({ id }) as
+      | ScheduledTaskRow
+      | null;
+    return row ? toScheduledTask(row) : null;
+  }
+
+  listScheduledTasks(agentId?: string): ScheduledTask[] {
+    const rows = agentId
+      ? (this.db
+          .query("SELECT * FROM scheduled_tasks WHERE agent_id = $agentId ORDER BY created_at, rowid")
+          .all({ agentId }) as ScheduledTaskRow[])
+      : (this.db.query("SELECT * FROM scheduled_tasks ORDER BY created_at, rowid").all() as ScheduledTaskRow[]);
+    return rows.map(toScheduledTask);
+  }
+
+  listDueScheduledTasks(now: number): ScheduledTask[] {
+    const rows = this.db
+      .query(
+        `SELECT * FROM scheduled_tasks
+         WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= $now
+         ORDER BY next_run_at`,
+      )
+      .all({ now }) as ScheduledTaskRow[];
+    return rows.map(toScheduledTask);
+  }
+
+  updateScheduledTask(
+    id: string,
+    patch: {
+      name?: string;
+      prompt?: string;
+      schedule?: TaskSchedule;
+      enabled?: boolean;
+      harness?: string | null;
+      model?: string | null;
+      effort?: string | null;
+      fast?: boolean;
+      nextRunAt?: number | null;
+      lastRunAt?: number | null;
+      lastRunThreadId?: string | null;
+      lastRunStatus?: ScheduledTaskRunStatus | null;
+      lastRunError?: string | null;
+    },
+  ): ScheduledTask | null {
+    const current = this.getScheduledTask(id);
+    if (!current) return null;
+    const next: ScheduledTask = {
+      ...current,
+      name: patch.name ?? current.name,
+      prompt: patch.prompt ?? current.prompt,
+      schedule: patch.schedule ?? current.schedule,
+      enabled: patch.enabled ?? current.enabled,
+      harness: patch.harness === undefined ? current.harness : patch.harness,
+      model: patch.model === undefined ? current.model : patch.model,
+      effort: patch.effort === undefined ? current.effort : patch.effort,
+      fast: patch.fast ?? current.fast,
+      nextRunAt: patch.nextRunAt === undefined ? current.nextRunAt : patch.nextRunAt,
+      lastRunAt: patch.lastRunAt === undefined ? current.lastRunAt : patch.lastRunAt,
+      lastRunThreadId: patch.lastRunThreadId === undefined ? current.lastRunThreadId : patch.lastRunThreadId,
+      lastRunStatus: patch.lastRunStatus === undefined ? current.lastRunStatus : patch.lastRunStatus,
+      lastRunError: patch.lastRunError === undefined ? current.lastRunError : patch.lastRunError,
+      updatedAt: Date.now(),
+    };
+    this.db
+      .query(
+        `UPDATE scheduled_tasks SET
+           name = $name, prompt = $prompt, schedule = $schedule, enabled = $enabled,
+           harness = $harness, model = $model, effort = $effort, fast = $fast,
+           next_run_at = $nextRunAt, last_run_at = $lastRunAt, last_run_thread_id = $lastRunThreadId,
+           last_run_status = $lastRunStatus, last_run_error = $lastRunError, updated_at = $updatedAt
+         WHERE id = $id`,
+      )
+      .run({
+        id,
+        name: next.name,
+        prompt: next.prompt,
+        schedule: JSON.stringify(next.schedule),
+        enabled: next.enabled ? 1 : 0,
+        harness: next.harness,
+        model: next.model,
+        effort: next.effort,
+        fast: next.fast ? 1 : 0,
+        nextRunAt: next.nextRunAt,
+        lastRunAt: next.lastRunAt,
+        lastRunThreadId: next.lastRunThreadId,
+        lastRunStatus: next.lastRunStatus,
+        lastRunError: next.lastRunError,
+        updatedAt: next.updatedAt,
+      });
+    return next;
+  }
+
+  deleteScheduledTask(id: string): boolean {
+    return this.db.query("DELETE FROM scheduled_tasks WHERE id = $id").run({ id }).changes > 0;
+  }
+
+  deleteScheduledTasksForAgent(agentId: string): number {
+    return this.db.query("DELETE FROM scheduled_tasks WHERE agent_id = $agentId").run({ agentId }).changes;
+  }
+
   getPreferences(personId = DEFAULT_PERSON_ID): UserPreferences {
     const row = this.db
       .query("SELECT data FROM preferences WHERE person_id = $personId")
@@ -582,6 +810,7 @@ function toThread(row: ThreadRow): StoredThread {
     effort: row.effort,
     fast: row.fast === 1,
     source: row.source === "schedule" ? "schedule" : "chat",
+    taskId: row.task_id,
     settledAt: row.settled_at,
     sessionId: row.session_id,
     status: row.status,
@@ -625,6 +854,28 @@ function toAttachment(row: AttachmentRow): StoredAttachment {
     url: attachmentUrl(row.id),
     storagePath: row.storage_path,
     createdAt: row.created_at,
+  };
+}
+
+function toScheduledTask(row: ScheduledTaskRow): ScheduledTask {
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    name: row.name,
+    prompt: row.prompt,
+    schedule: JSON.parse(row.schedule) as TaskSchedule,
+    enabled: row.enabled === 1,
+    harness: row.harness,
+    model: row.model,
+    effort: row.effort,
+    fast: row.fast === 1,
+    nextRunAt: row.next_run_at,
+    lastRunAt: row.last_run_at,
+    lastRunThreadId: row.last_run_thread_id,
+    lastRunStatus: row.last_run_status,
+    lastRunError: row.last_run_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
