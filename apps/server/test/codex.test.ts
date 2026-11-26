@@ -270,6 +270,25 @@ describe("codexThreadConfig", () => {
     expect(unresolved).toEqual(["Nope"]);
     expect(config.sandbox_workspace_write).toEqual({ network_access: true, writable_roots: ["/srv/x"] });
   });
+
+  test("wires the Staf MCP bridge into mcp_servers", () => {
+    const { config } = codexThreadConfig(
+      { network: true, harnessApps: [], writableFolders: [] },
+      [],
+      {
+        command: "/usr/local/bin/staf",
+        args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
+        env: { STAF_RUN_TOKEN: "tok-codex" },
+      },
+    );
+    expect(config.mcp_servers).toEqual({
+      staf: {
+        command: "/usr/local/bin/staf",
+        args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
+        env: { STAF_RUN_TOKEN: "tok-codex" },
+      },
+    });
+  });
 });
 
 describe("activityFromItem", () => {
@@ -291,6 +310,12 @@ describe("activityFromItem", () => {
       false,
     );
     expect(tool).toMatchObject({ kind: "tool", title: "Used gmail · search", status: "running" });
+
+    const stafTool = activityFromItem(
+      { type: "mcpToolCall", id: "5", server: "staf", tool: "attach_file", status: "completed", error: null },
+      true,
+    );
+    expect(stafTool).toMatchObject({ kind: "file", title: "Attached a file", status: "done" });
 
     expect(activityFromItem({ type: "userMessage", id: "4" }, true)).toBeNull();
   });

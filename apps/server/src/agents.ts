@@ -338,6 +338,7 @@ export function chatInstructions(agent: Pick<Agent, "instructions">, now = new D
   const parts = [
     "You are running inside Staf, a personal assistant for a household. You are not working on a software project unless the person asks for one.",
     "The person reads your answer in a chat app that renders Markdown. Lead with the answer. Keep it short unless they ask for depth. Use links for sources.",
+    "When you create a file that the person should view or download (such as a PDF, chart, or report), use Staf's attach_file tool to attach it directly to your reply.",
     "Do not describe your tools or your working folder unless the person asks.",
     `The conversation started on ${date} (${zone}).`,
   ];

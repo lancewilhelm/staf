@@ -21,6 +21,7 @@ import {
 } from "./attachments.ts";
 import type { EventBus } from "./bus.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome } from "./harness/types.ts";
+import { defaultBridgeConfig, type RunTokenStore, type RunTrigger } from "./mcp/tokens.ts";
 import { publicAttachment, publicThread, type Store, type StoredMessageMeta } from "./store.ts";
 
 export class ChatError extends Error {
@@ -52,6 +53,8 @@ export class ChatService {
     private readonly attachmentsDir: string,
     /** Overrides the harness that agents ask for, such as "fake" for offline work. */
     private readonly harnessOverride: string | null = null,
+    private readonly runTokens: RunTokenStore | null = null,
+    private readonly getServerUrl: (() => string | null) | null = null,
   ) {}
 
   listThreads(): ThreadSummary[] {
@@ -120,6 +123,7 @@ export class ChatService {
     const harness = change.harness ?? thread.harness;
     if (change.harness !== undefined) this.checkHarness(harness, null);
     const switching = harness !== thread.harness;
+    if (switching) this.runTokens?.revokeThread(id);
     const settledAt =
       change.settled === undefined ? undefined : change.settled ? (thread.settledAt ?? Date.now()) : null;
     const updated = this.store.updateThread(id, {
@@ -143,6 +147,7 @@ export class ChatService {
       await run.done;
     }
     if (!this.store.getThread(id)) throw new ChatError(404, "That conversation does not exist.");
+    this.runTokens?.revokeThread(id);
     for (const session of this.store.listSessions(id)) {
       const harness = this.harnesses.get(session.harness);
       // A harness that Staf no longer has cannot be asked; its copy stays where it is.
@@ -238,7 +243,12 @@ export class ChatService {
     this.running.get(id)?.controller.abort();
   }
 
-  send(threadId: string, rawText: string, rawAttachmentIds: string[] = []): SendMessageResponse {
+  send(
+    threadId: string,
+    rawText: string,
+    rawAttachmentIds: string[] = [],
+    options: { trigger?: RunTrigger } = {},
+  ): SendMessageResponse {
     const text = rawText.trim();
     const attachmentIds = [...new Set(rawAttachmentIds)];
     if (!text && attachmentIds.length === 0) throw new ChatError(400, "The message is empty.");
@@ -307,6 +317,7 @@ export class ChatService {
 
     const controller = new AbortController();
     const done = this.runTurn({
+      agentId: agent.id,
       threadId,
       sessionId: thread.sessionId,
       harnessId: thread.harness,
@@ -316,6 +327,8 @@ export class ChatService {
       model: thread.model,
       effort: thread.effort,
       fast: thread.fast,
+      trigger: options.trigger ?? "chat",
+      taskId: thread.taskId,
       input,
       ...(withHistory ? { inputWithHistory: withHistory } : {}),
       message: assistantMessage,
@@ -351,9 +364,11 @@ export class ChatService {
   async stopAll(): Promise<void> {
     for (const run of this.running.values()) run.controller.abort();
     await this.idle();
+    this.runTokens?.revokeAll();
   }
 
   private async runTurn(input: {
+    agentId: string;
     threadId: string;
     sessionId: string | null;
     harnessId: string;
@@ -363,6 +378,8 @@ export class ChatService {
     model: string | null;
     effort: string | null;
     fast: boolean;
+    trigger: RunTrigger;
+    taskId: string | null;
     input: string;
     inputWithHistory?: string;
     message: Message;
@@ -412,6 +429,20 @@ export class ChatService {
     };
 
     const harness = this.harnesses.get(input.harnessId);
+    const serverUrl = this.getServerUrl?.() ?? null;
+    const runToken =
+      harness && this.runTokens && serverUrl
+        ? this.runTokens.beginRun({
+            agentId: input.agentId,
+            threadId,
+            messageId: message.id,
+            trigger: input.trigger,
+            taskId: input.taskId,
+            harnessId: input.harnessId,
+            singleTurn: input.harnessId === "claude",
+          })
+        : null;
+    const mcp = runToken && serverUrl ? defaultBridgeConfig(serverUrl, runToken.token) : undefined;
     let outcome: TurnOutcome;
     try {
       outcome = harness
@@ -423,6 +454,7 @@ export class ChatService {
             model: input.model,
             effort: input.effort,
             fast: input.fast,
+            ...(mcp ? { mcp } : {}),
             input: input.input,
             ...(input.inputWithHistory ? { inputWithHistory: input.inputWithHistory } : {}),
             signal: input.signal,
@@ -431,6 +463,8 @@ export class ChatService {
         : { status: "failed", error: `Staf has no harness named "${input.harnessId}".` };
     } catch (error) {
       outcome = { status: "failed", error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      runToken?.end();
     }
 
     this.live.delete(message.id);

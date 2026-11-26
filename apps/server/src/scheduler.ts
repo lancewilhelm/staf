@@ -248,7 +248,7 @@ export class Scheduler {
     this.activeRuns.add(task.id);
     let assistantMessageId: string;
     try {
-      const sent = this.chat.send(thread.id, task.prompt);
+      const sent = this.chat.send(thread.id, task.prompt, [], { trigger: "schedule" });
       assistantMessageId = sent.assistantMessage.id;
     } catch (error) {
       this.activeRuns.delete(task.id);

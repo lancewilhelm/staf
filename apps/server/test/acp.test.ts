@@ -154,6 +154,27 @@ describe("Antigravity over ACP", () => {
     await adapter.runTurn(request);
     expect(titles(events)[0]).toStartWith("failed: Antigravity can only write to the agent's workspace");
   });
+
+  test("passes the Staf MCP bridge in session/new mcpServers", async () => {
+    const { adapter, workspace, sent } = setup();
+    const { request } = turn(workspace, {
+      mcp: {
+        command: "/usr/local/bin/staf",
+        args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
+        env: { STAF_RUN_TOKEN: "tok-acp" },
+      },
+    });
+    await adapter.runTurn(request);
+    const start = sent().find((m) => m.method === "session/new")!;
+    expect(start.params.mcpServers).toEqual([
+      {
+        name: "staf",
+        command: "/usr/local/bin/staf",
+        args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
+        env: [{ name: "STAF_RUN_TOKEN", value: "tok-acp" }],
+      },
+    ]);
+  });
 });
 
 describe("ACP permission rules", () => {

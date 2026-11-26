@@ -27,6 +27,7 @@ import { ChatError, type ChatService } from "./chat.ts";
 import { VERSION } from "./config.ts";
 import { CodexAdapter } from "./harness/codex/adapter.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
+import { McpAuthError, type McpServer } from "./mcp/server.ts";
 import type { Scheduler } from "./scheduler.ts";
 import type { Store } from "./store.ts";
 
@@ -39,6 +40,7 @@ export interface HttpOptions {
   agents: Agents;
   bus: EventBus;
   harnesses: Map<string, HarnessAdapter>;
+  mcp?: McpServer;
   /** The web app. Tests can leave it out. */
   web?: HTMLBundle;
   development?: boolean;
@@ -230,6 +232,23 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       POST: api((req) => {
         chat.interrupt(req.params.id!);
         return new Response(null, { status: 204 });
+      }),
+    },
+    "/api/mcp": {
+      POST: api(async (req) => {
+        if (!options.mcp) throw new ChatError(404, "The Staf MCP server is not enabled.");
+        const auth = req.headers.get("authorization") ?? "";
+        const match = /^Bearer\s+(.+)$/i.exec(auth);
+        if (!match) return json({ error: "Missing Staf run token." }, 401);
+        const body = await readJson(req);
+        try {
+          const reply = options.mcp.handleMessage(match[1]!.trim(), body);
+          if (reply === null) return new Response(null, { status: 202 });
+          return json(reply);
+        } catch (error) {
+          if (error instanceof McpAuthError) return json({ error: error.message }, 401);
+          throw error;
+        }
       }),
     },
     "/api/events": {

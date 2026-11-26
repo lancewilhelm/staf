@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Activity, HarnessInfo, ModelInfo, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import { VERSION } from "../../config.ts";
+import type { McpBridgeConfig } from "../../mcp/tokens.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest, TurnUsageReport } from "../types.ts";
 import type {
   AgentMessageDelta,
@@ -15,7 +16,15 @@ import type {
   TurnCompletedNotification,
   TurnStartResponse,
 } from "./protocol.ts";
-import { basename, describeError as describe, firstLine, hostOf, noteActivity, truncate } from "../activities.ts";
+import {
+  basename,
+  describeError as describe,
+  describeStafTool,
+  firstLine,
+  hostOf,
+  noteActivity,
+  truncate,
+} from "../activities.ts";
 import { RpcError, RpcProcess } from "../rpc.ts";
 
 export interface CodexOptions {
@@ -192,7 +201,7 @@ export class CodexAdapter implements HarnessAdapter {
     if (!ready.ready) return { status: "failed", error: ready.detail ?? "Codex is not ready." };
 
     const rpc = await this.connect();
-    const { config, unresolved } = codexThreadConfig(request.access, this.readAppCatalog());
+    const { config, unresolved } = codexThreadConfig(request.access, this.readAppCatalog(), request.mcp);
     for (const name of unresolved) {
       const now = Date.now();
       request.emit({
@@ -517,6 +526,7 @@ export class CodexAdapter implements HarnessAdapter {
 export function codexThreadConfig(
   access: AgentAccess,
   catalog: CodexApp[],
+  mcp?: McpBridgeConfig,
 ): { config: Record<string, unknown>; unresolved: string[] } {
   const ids: string[] = [];
   const unresolved: string[] = [];
@@ -553,6 +563,15 @@ export function codexThreadConfig(
     const apps: Record<string, unknown> = { _default: { enabled: false, destructive_enabled: false } };
     for (const id of ids) apps[id] = { enabled: true, destructive_enabled: false };
     config.apps = apps;
+  }
+  if (mcp) {
+    config.mcp_servers = {
+      staf: {
+        command: mcp.command,
+        args: mcp.args,
+        env: mcp.env,
+      },
+    };
   }
   return { config, unresolved };
 }
@@ -594,11 +613,14 @@ export function activityFromItem(item: ThreadItem, completed: boolean): Activity
     }
     case "mcpToolCall": {
       const call = item as Extract<ThreadItem, { type: "mcpToolCall" }>;
+      const stafStep = call.server === "staf" ? describeStafTool(call.tool) : null;
       const activity: Activity = {
         ...base,
-        kind: "tool",
+        kind: stafStep?.kind ?? "tool",
         // Account apps all arrive through Codex's "codex_apps" server, so name the tool instead.
-        title: call.server === "codex_apps" ? `Used ${call.tool}` : `Used ${call.server} · ${call.tool}`,
+        title:
+          stafStep?.title ??
+          (call.server === "codex_apps" ? `Used ${call.tool}` : `Used ${call.server} · ${call.tool}`),
         status: completed ? (call.status === "failed" ? "failed" : "done") : "running",
       };
       if (call.error?.message) activity.detail = call.error.message;

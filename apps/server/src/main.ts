@@ -4,6 +4,7 @@ import web from "../../web/index.html";
 import { createApp } from "./app.ts";
 import { apps, ask, chat, CliError, login, status, threads } from "./cli/commands.ts";
 import { DEFAULT_HOST, resolvePaths, resolvePort, VERSION } from "./config.ts";
+import { runMcpBridge } from "./mcp/bridge.ts";
 
 const HELP = `Staf ${VERSION}: a personal agent host
 
@@ -21,6 +22,7 @@ Usage:
   staf status                Show whether the host and harnesses are ready
   staf login codex           Sign Staf in to ChatGPT through Codex
   staf apps [--all]          List the ChatGPT apps that agents can be given
+  staf mcp-bridge            Bridge stdio MCP calls to the running host (used by harnesses)
 
 Environment:
   STAF_HOME      Data folder (default ~/.staf)
@@ -72,6 +74,8 @@ async function main(argv: string[]): Promise<number> {
       return login(args);
     case "apps":
       return apps(args);
+    case "mcp-bridge":
+      return runMcpBridge(args);
     case "version":
     case "--version":
       process.stdout.write(`${VERSION}\n`);

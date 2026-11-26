@@ -10,6 +10,8 @@ import { CodexAdapter } from "./harness/codex/adapter.ts";
 import { FakeHarness } from "./harness/fake.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
 import { startHttp } from "./http.ts";
+import { McpServer } from "./mcp/server.ts";
+import { RunTokenStore } from "./mcp/tokens.ts";
 import { Scheduler } from "./scheduler.ts";
 import { Store } from "./store.ts";
 
@@ -30,6 +32,7 @@ export interface App {
   chat: ChatService;
   scheduler: Scheduler;
   store: Store;
+  runTokens: RunTokenStore;
   stop(): Promise<void>;
 }
 
@@ -58,6 +61,8 @@ export function createApp(options: AppOptions): App {
       ...(options.harnessOverride === "fake" ? [new FakeHarness({ delayMs: 40 })] : []),
     ];
   const harnesses = new Map(list.map((harness) => [harness.id, harness]));
+  const runTokens = new RunTokenStore();
+  let serverUrl: string | null = null;
   const chat = new ChatService(
     store,
     agents,
@@ -65,8 +70,11 @@ export function createApp(options: AppOptions): App {
     bus,
     paths.attachments,
     options.harnessOverride ?? null,
+    runTokens,
+    () => serverUrl,
   );
   const scheduler = new Scheduler(store, agents, chat, bus, options.harnessOverride ?? null);
+  const mcp = new McpServer({ tokens: runTokens, store, agents, chat, scheduler });
   scheduler.start();
 
   const server = startHttp({
@@ -78,15 +86,18 @@ export function createApp(options: AppOptions): App {
     agents,
     bus,
     harnesses,
+    mcp,
     web: options.web,
     development: options.development,
   });
+  serverUrl = server.url.origin;
 
   return {
     url: server.url,
     chat,
     scheduler,
     store,
+    runTokens,
     async stop() {
       await chat.stopAll();
       await scheduler.stop();

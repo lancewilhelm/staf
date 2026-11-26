@@ -83,3 +83,36 @@ export function truncate(text: string): string {
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** Returns a plain-English step title for a built-in Staf MCP tool call, or null if unknown. */
+export function describeStafTool(
+  toolName: string,
+  input: Record<string, unknown> = {},
+): Pick<Activity, "kind" | "title"> | null {
+  const str = (key: string) => (typeof input[key] === "string" ? (input[key] as string).trim() : "");
+  switch (toolName) {
+    case "attach_file": {
+      const label = str("name") || (str("path") ? basename(str("path")) : "");
+      return { kind: "file", title: label ? `Attached ${label}` : "Attached a file" };
+    }
+    case "list_scheduled_tasks":
+      return { kind: "tool", title: "Checked scheduled tasks" };
+    case "create_scheduled_task": {
+      const name = str("name");
+      return { kind: "tool", title: name ? `Created scheduled task: ${name}` : "Created a scheduled task" };
+    }
+    case "update_scheduled_task":
+      return { kind: "tool", title: "Updated a scheduled task" };
+    case "delete_scheduled_task":
+      return { kind: "tool", title: "Deleted a scheduled task" };
+    case "conversation_search": {
+      const query = str("query");
+      return {
+        kind: "search",
+        title: query ? `Searched past conversations: ${query}` : "Searched past conversations",
+      };
+    }
+    default:
+      return null;
+  }
+}

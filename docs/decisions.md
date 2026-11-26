@@ -3,6 +3,36 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-26: Claude Code uses explicit isolation flags instead of `--safe-mode` so Staf's MCP bridge can load
+
+Staf's probe against Claude Code 2.1.332 showed that `--safe-mode` ignores `--mcp-config`
+completely and exposes zero MCP servers, even when `--strict-mcp-config` is also passed.
+For turns, Staf now replaces `--safe-mode` with `--setting-sources ""`,
+`--strict-mcp-config`, `--no-chrome`, and explicit `--settings` overrides
+(`autoMemoryEnabled: false`, `disableAllHooks: true`, `enabledPlugins: {}`), and passes
+Staf's bridge through `--mcp-config` with `mcp__staf__*` pre-approved in `--allowedTools`.
+Model discovery probes still use `--safe-mode` because they do not need MCP tools.
+
+Why: this preserves the same isolation from a person's personal `CLAUDE.md`, settings,
+hooks, plugins, auto-memory, and personal MCP servers while allowing Claude Code to
+connect to Staf's own MCP server.
+
+## 2026-11-26: Scoped run tokens use `STAF_RUN_TOKEN` and enforce active-turn checks on every tool call
+
+Every harness reaches Staf's local MCP endpoint (`/api/mcp`) through `staf mcp-bridge`,
+which forwards stdio JSON-RPC messages with an in-memory run token passed through the
+`STAF_RUN_TOKEN` environment variable (the CLI also accepts `--token` for manual use).
+Per-turn harnesses (Claude Code) receive a single-turn token pinned to the current
+assistant message and revoked as soon as the turn finishes. Persistent-session harnesses
+(Codex and Antigravity over ACP) keep one bridge process alive across turns in a loaded
+session, so they receive a thread-session token that is accepted for `tools/call` only
+while that thread has a turn running, and is revoked when the thread switches harnesses or
+is deleted.
+
+Why: passing the token in the bridge process's environment keeps it out of `ps` command
+lines, and checking for an active run on every tool call ensures that an idle or finished
+session cannot call Staf tools outside a live turn.
+
 ## 2026-11-26: No outbound telemetry — all stats stay strictly local
 
 Staf never sends telemetry, analytics, crash reports, update pings, or third-party asset

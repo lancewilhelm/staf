@@ -20,7 +20,7 @@ import {
   type UserPreferences,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 const DEFAULT_PERSON_ID = "default";
 
 /** Full per-message metadata stored in SQLite, including raw provider fields not exposed to clients. */
@@ -109,6 +109,17 @@ export interface StoredThread extends ThreadSummary {
   sessionId: string | null;
 }
 
+/** One full-text search hit across an agent's past messages. */
+export interface ConversationSearchHit {
+  threadId: string;
+  threadTitle: string;
+  threadSource: ThreadSource;
+  messageId: string;
+  role: MessageRole;
+  snippet: string;
+  createdAt: number;
+}
+
 export interface MessagePatch {
   text?: string;
   activities?: Activity[];
@@ -144,6 +155,34 @@ export class Store {
     if (version < 5) this.migrateToV5();
     if (version < 6) this.migrateToV6();
     if (version < 7) this.migrateToV7();
+    if (version < 8) this.migrateToV8();
+  }
+
+  private migrateToV8(): void {
+    this.db.transaction(() => {
+      this.db.run(`
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+          text,
+          content='messages',
+          content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        )`);
+      this.db.run(`
+        CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+          INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+        END`);
+      this.db.run(`
+        CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+        END`);
+      this.db.run(`
+        CREATE TRIGGER messages_fts_update AFTER UPDATE OF text ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+          INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+        END`);
+      this.db.run("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+      this.db.run("PRAGMA user_version = 8");
+    })();
   }
 
   private migrateToV7(): void {
@@ -551,6 +590,56 @@ export class Store {
     return rows.map((row) => toMessage(row, byMessage.get(row.id) ?? []));
   }
 
+  /** Searches one agent's past messages with SQLite FTS5. Never returns another agent's messages. */
+  searchMessages(
+    agentId: string,
+    rawQuery: string,
+    options: { limit?: number; excludeThreadId?: string } = {},
+  ): ConversationSearchHit[] {
+    const ftsQuery = buildFtsQuery(rawQuery);
+    if (!ftsQuery) return [];
+    const limit = Math.max(1, Math.min(25, options.limit ?? 10));
+    const excludeThreadId = options.excludeThreadId ?? null;
+    const rows = this.db
+      .query(
+        `SELECT
+           m.id AS message_id,
+           m.thread_id,
+           t.title AS thread_title,
+           t.source AS thread_source,
+           m.role,
+           snippet(messages_fts, 0, '[', ']', '…', 24) AS snippet,
+           m.created_at
+         FROM messages_fts
+         JOIN messages m ON m.rowid = messages_fts.rowid
+         JOIN threads t ON t.id = m.thread_id
+         WHERE messages_fts MATCH $ftsQuery
+           AND t.agent_id = $agentId
+           AND m.status != 'streaming'
+           AND ($excludeThreadId IS NULL OR m.thread_id != $excludeThreadId)
+         ORDER BY bm25(messages_fts), m.created_at DESC
+         LIMIT $limit`,
+      )
+      .all({ ftsQuery, agentId, excludeThreadId, limit }) as Array<{
+      message_id: string;
+      thread_id: string;
+      thread_title: string;
+      thread_source: ThreadSource;
+      role: MessageRole;
+      snippet: string;
+      created_at: number;
+    }>;
+    return rows.map((row) => ({
+      threadId: row.thread_id,
+      threadTitle: row.thread_title,
+      threadSource: row.thread_source === "schedule" ? "schedule" : "chat",
+      messageId: row.message_id,
+      role: row.role,
+      snippet: row.snippet,
+      createdAt: row.created_at,
+    }));
+  }
+
   createAttachment(input: {
     id: string;
     threadId: string;
@@ -938,6 +1027,25 @@ function toScheduledTask(row: ScheduledTaskRow): ScheduledTask {
 export function publicThread(thread: StoredThread): ThreadSummary {
   const { sessionId: _sessionId, ...summary } = thread;
   return summary;
+}
+
+/**
+ * Turns a plain search string into a safe FTS5 MATCH expression by quoting each phrase
+ * or token so that punctuation such as hyphens, colons, or apostrophes never triggers
+ * an FTS5 syntax error.
+ */
+export function buildFtsQuery(raw: string): string {
+  const parts: string[] = [];
+  const pattern = /"([^"]+)"|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw)) !== null) {
+    const token = (match[1] ?? match[2] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+    if (!token) continue;
+    // Skip pure punctuation tokens that unicode61 tokenizes to nothing.
+    if (!/[\p{L}\p{N}]/u.test(token)) continue;
+    parts.push(`"${token.replaceAll('"', '""')}"`);
+  }
+  return parts.join(" ");
 }
 
 /** The public view of an attachment, without its path on disk. */

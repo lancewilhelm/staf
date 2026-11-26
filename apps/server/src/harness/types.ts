@@ -1,5 +1,6 @@
 import type { Activity, HarnessInfo, ModelInfo, SessionAction, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../agents.ts";
+import type { McpBridgeConfig } from "../mcp/tokens.ts";
 
 /** Harness-reported timing, model, and usage metadata captured during a turn. */
 export interface TurnUsageReport {
@@ -48,6 +49,8 @@ export interface TurnRequest {
   effort: string | null;
   /** Whether to use fast mode. Adapters ignore it when the model has none. */
   fast: boolean;
+  /** Optional local Staf MCP bridge configuration for this run. */
+  mcp?: McpBridgeConfig;
   input: string;
   /**
    * The input for a new session when the saved one is gone: the earlier conversation and

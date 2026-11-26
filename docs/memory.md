@@ -35,7 +35,7 @@ off:
 | Harness | Its memory feature | Status |
 |---|---|---|
 | Codex | `memories` feature | Off: Staf sets it off on every thread. |
-| Claude | Auto-memory | Off: `--safe-mode` turns it off. |
+| Claude | Auto-memory | Off: Staf passes `autoMemoryEnabled: false` in `--settings` and `--setting-sources ""` so that Staf's MCP bridge still loads while personal settings and auto-memory stay off. |
 | Antigravity | Automatic knowledge in `implicit/` | **Cannot be turned off.** agy 1.5 controls it with a server-side flag, not a setting. It is shared by every conversation in Staf's Antigravity folder. `brain/` holds one folder per conversation and is deleted with the conversation. |
 
 The Antigravity gap matters once a second person has agents (slice 5). Before then, either give

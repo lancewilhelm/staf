@@ -9,6 +9,7 @@ import {
   AnswerText,
   basename,
   describeError,
+  describeStafTool,
   firstLine,
   hostOf,
   truncate,
@@ -97,16 +98,35 @@ const PREAPPROVED = ["Bash", "WebSearch", "WebFetch"];
 
 /** Builds the command-line arguments for one turn. */
 export function claudeArgs(
-  request: Pick<TurnRequest, "sessionId" | "instructions" | "model" | "effort" | "fast" | "access">,
+  request: Pick<TurnRequest, "sessionId" | "instructions" | "model" | "effort" | "fast" | "access" | "mcp">,
 ): string[] {
+  const allowedTools = request.mcp ? [...PREAPPROVED, "mcp__staf__*"] : PREAPPROVED;
   return [
     "-p",
     "--output-format",
     "stream-json",
     "--verbose",
     "--include-partial-messages",
-    // Leaves out the person's CLAUDE.md, skills, plugins, hooks, and MCP servers.
-    "--safe-mode",
+    // Leaves out the person's CLAUDE.md, user/project/local settings, skills, hooks, plugins,
+    // and user MCP servers while still allowing Staf's own --mcp-config (--safe-mode ignores --mcp-config).
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--no-chrome",
+    ...(request.mcp
+      ? [
+          "--mcp-config",
+          JSON.stringify({
+            mcpServers: {
+              staf: {
+                command: request.mcp.command,
+                args: request.mcp.args,
+                env: request.mcp.env,
+              },
+            },
+          }),
+        ]
+      : []),
     // Edits inside the working folders are accepted. Anything that would ask is refused,
     // because nobody can answer in print mode.
     "--permission-mode",
@@ -114,7 +134,7 @@ export function claudeArgs(
     "--tools",
     ...CLAUDE_TOOLS,
     "--allowedTools",
-    ...PREAPPROVED,
+    ...allowedTools,
     "--settings",
     JSON.stringify(claudeSettings(request.access, request.fast)),
     "--append-system-prompt",
@@ -128,12 +148,16 @@ export function claudeArgs(
 
 /**
  * Commands run in Claude Code's sandbox and may not leave it. Network access is open to
- * every domain when the agent allows it, and closed otherwise. Fast mode is set either way,
- * so that the person's own Claude Code setting does not apply.
+ * every domain when the agent allows it, and closed otherwise. Fast mode, auto-memory,
+ * hooks, and plugins are set explicitly so that the person's own Claude Code settings
+ * cannot apply.
  */
 export function claudeSettings(access: AgentAccess, fast = false): Record<string, unknown> {
   return {
     fastMode: fast,
+    autoMemoryEnabled: false,
+    disableAllHooks: true,
+    enabledPlugins: {},
     sandbox: {
       enabled: true,
       autoAllowBashIfSandboxed: true,
@@ -596,8 +620,19 @@ export function toolActivity(
       const skill = text("skill") || text("name");
       return { ...base, kind: "tool", title: skill ? `Used the ${skill} skill` : "Used a skill" };
     }
-    default:
+    default: {
+      if (name.startsWith("mcp__staf__")) {
+        const stafStep = describeStafTool(name.slice("mcp__staf__".length), input);
+        if (stafStep) {
+          return {
+            ...base,
+            ...stafStep,
+            ...(status === "failed" && output ? { detail: truncate(output) } : {}),
+          };
+        }
+      }
       return { ...base, kind: "tool", title: `Used ${name}`, ...(output ? { detail: truncate(output) } : {}) };
+    }
   }
 }
 

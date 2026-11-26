@@ -4,12 +4,14 @@ Staf is a personal agent host for a household. It runs existing agent harnesses 
 through Codex, Gemini through Antigravity, and Claude through Claude Code) and gives them
 a simple chat interface in the browser and the terminal. Read the [specification](docs/spec.md) for the design and the delivery plan.
 
-Status: slice 1 and slice 2 (2a–2c) are done. Chat works in the web app and the CLI on all
-three harnesses. Agents are managed from the sidebar in their own panel (profile and
-per-agent scheduled tasks), appearance and sidebar preferences sync on the host, threads
-support message attachments and either an Inbox mode (with Working, Inbox, and Settled
-sections) or a plain Thread list mode, sidebar rows show working time and thread age, and
-each thread can switch provider, model, reasoning level, and fast mode.
+Status: slices 1, 2, and 3a are done. Chat works in the web app and the CLI on all three
+harnesses. Agents are managed from the sidebar in their own panel (profile and per-agent
+scheduled tasks), appearance and sidebar preferences sync on the host, threads support
+message attachments and either an Inbox mode (with Working, Inbox, and Settled sections)
+or a plain Thread list mode, sidebar rows show working time and thread age, each thread
+can switch provider, model, reasoning level, and fast mode, and every harness connects to
+Staf's local MCP server through `staf mcp-bridge` with scoped run tokens (`attach_file`,
+agent-scoped scheduled task tools, and FTS5 `conversation_search`).
 
 ## Documentation
 

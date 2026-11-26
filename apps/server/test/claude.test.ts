@@ -9,6 +9,7 @@ import {
   claudeSettings,
   CLAUDE_QUIET_ENV,
   CLAUDE_TOOLS,
+  toolActivity,
 } from "../src/harness/claude/adapter.ts";
 import type { HarnessEvent, TurnRequest } from "../src/harness/types.ts";
 
@@ -141,7 +142,11 @@ describe("claudeArgs", () => {
       fast: false,
       access: { network: false, harnessApps: [], writableFolders: ["/srv/notes"] },
     });
-    expect(args).toContain("--safe-mode");
+    expect(args).not.toContain("--safe-mode");
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).toContain("--no-chrome");
+    expect(args).not.toContain("--mcp-config");
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("acceptEdits");
     expect(args.slice(args.indexOf("--tools") + 1, args.indexOf("--tools") + 1 + CLAUDE_TOOLS.length)).toEqual(CLAUDE_TOOLS);
     expect(args[args.indexOf("--append-system-prompt") + 1]).toBe("Be brief.");
@@ -156,11 +161,51 @@ describe("claudeArgs", () => {
     });
   });
 
+  test("passes the Staf MCP bridge via --mcp-config and pre-approves Staf tools", () => {
+    const args = claudeArgs({
+      sessionId: null,
+      instructions: "Be brief.",
+      model: null,
+      effort: null,
+      fast: false,
+      access: { network: true, harnessApps: [], writableFolders: [] },
+      mcp: {
+        command: "/usr/local/bin/staf",
+        args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
+        env: { STAF_RUN_TOKEN: "tok-123" },
+      },
+    });
+    const config = JSON.parse(args[args.indexOf("--mcp-config") + 1]!);
+    expect(config).toEqual({
+      mcpServers: {
+        staf: {
+          command: "/usr/local/bin/staf",
+          args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
+          env: { STAF_RUN_TOKEN: "tok-123" },
+        },
+      },
+    });
+    expect(args).toContain("mcp__staf__*");
+    expect(toolActivity("1", "mcp__staf__attach_file", { path: "out/report.pdf" }, "done")).toMatchObject({
+      kind: "file",
+      title: "Attached report.pdf",
+      status: "done",
+    });
+    expect(toolActivity("2", "mcp__staf__conversation_search", { query: "lisbon" }, "done")).toMatchObject({
+      kind: "search",
+      title: "Searched past conversations: lisbon",
+      status: "done",
+    });
+  });
+
   test("opens the sandbox network only when the agent allows it", () => {
     const closed = claudeSettings({ network: false, harnessApps: [], writableFolders: [] });
     const open = claudeSettings({ network: true, harnessApps: [], writableFolders: [] });
     expect(closed).toEqual({
       fastMode: false,
+      autoMemoryEnabled: false,
+      disableAllHooks: true,
+      enabledPlugins: {},
       sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
     });
     expect(open.sandbox).toMatchObject({ network: { allowedDomains: ["*"] } });

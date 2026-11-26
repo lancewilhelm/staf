@@ -99,9 +99,9 @@ stream normalized events, interrupt the turn, and report whether the harness is 
 
 | Harness | Transport | Instructions | Staf tools |
 |---|---|---|---|
-| Codex | `codex app-server`, JSON-RPC lines over stdio | `developerInstructions` on `thread/start` and `thread/resume` | Per-thread `config` that adds the Staf MCP bridge |
-| Antigravity | `agy acp --sandbox --gemini-dir <Staf's folder>` | `_meta.antigravity.systemPrompt.append` on `session/new` | `mcpServers` in ACP `session/new` |
-| Claude | `claude -p --output-format stream-json --safe-mode`, one process per turn | `--append-system-prompt` | `--mcp-config` (check that it works with `--safe-mode`) |
+| Codex | `codex app-server`, JSON-RPC lines over stdio | `developerInstructions` on `thread/start` and `thread/resume` | Per-thread `config.mcp_servers.staf` running `staf mcp-bridge` |
+| Antigravity | `agy acp --sandbox --gemini-dir <Staf's folder>` | `_meta.antigravity.systemPrompt.append` on `session/new` | `mcpServers` in ACP `session/new` and `session/load` |
+| Claude | `claude -p --output-format stream-json --setting-sources "" --strict-mcp-config`, one process per turn | `--append-system-prompt` | `--mcp-config` with `mcp__staf__*` pre-approved (note: `--safe-mode` ignores `--mcp-config`) |
 | Hermes (optional) | `hermes acp` | `AGENTS.md` | ACP `mcpServers` |
 
 Agent settings reach the harness as one neutral `access` value (network, harness apps,
@@ -286,11 +286,17 @@ Each slice is used live before the next one starts.
        [decisions.md](decisions.md)), and fast mode stays off unless turned on explicitly.
      - **First live scheduled task:** Port the `morning-intel` skill from Hermes into a
        local agent workspace and run it live.
-3. **The Staf MCP server and memory v1.** Run tokens, the first Staf tools (inbox
-   delivery, scheduled task tools so that an agent can manage its own schedules, `memory`,
-   and `conversation_search`), and per-agent memory as designed in [memory.md](memory.md),
-   with memory blocks and limits in each agent's panel and proposals surfacing as cards in
-   threads and the Inbox. Check first that Claude's `--safe-mode` accepts `--mcp-config`.
+3. **The Staf MCP server and memory v1.**
+   - 3a: run tokens, local `/api/mcp` server, `staf mcp-bridge`, adapter wiring across
+     Codex, Claude (using `--setting-sources ""` + `--strict-mcp-config` because
+     `--safe-mode` ignores `--mcp-config`), and ACP, plus the first Staf tools
+     (`attach_file` for workspace-to-reply attachment delivery, agent-scoped scheduled
+     task tools `list_scheduled_tasks`, `create_scheduled_task`, `update_scheduled_task`,
+     and `delete_scheduled_task`, and SQLite FTS5 `conversation_search`). Done.
+   - 3b (Planned): per-agent memory v1 as designed in [memory.md](memory.md), with
+     `notes` and `profile` blocks, character limits, prompt-injection scanning, the
+     `memory` tool, reminders, proposal cards in threads and the Inbox, the **Memory**
+     tab in each agent's panel, and `staf memory` CLI.
 4. **Gmail.** Setup, a trigger for new mail, inbox monitoring, the personal feed that
    `morning-intel` reads, and inline approval cards for sending mail in threads and the
    Inbox.

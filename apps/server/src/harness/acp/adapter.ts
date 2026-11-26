@@ -11,6 +11,7 @@ import {
   AnswerText,
   basename,
   describeError,
+  describeStafTool,
   firstLine,
   hostOf,
   truncate,
@@ -230,9 +231,19 @@ export class AcpAdapter implements HarnessAdapter {
 
     const rpc = await this.connect();
     const meta = this.options.sessionMeta?.(request.instructions);
+    const mcpServers = request.mcp
+      ? [
+          {
+            name: "staf",
+            command: request.mcp.command,
+            args: request.mcp.args,
+            env: Object.entries(request.mcp.env).map(([name, value]) => ({ name, value })),
+          },
+        ]
+      : [];
     const sessionParams = {
       cwd: request.cwd,
-      mcpServers: [],
+      mcpServers,
       ...(meta ? { _meta: meta } : {}),
     };
 
@@ -596,8 +607,18 @@ export function activityFromToolCall(call: AcpToolCall): Activity {
       };
     case "think":
       return { ...base, kind: "reasoning", title: "Thought it through", ...(output ? { detail: truncate(output) } : {}) };
-    default:
+    default: {
+      const normalized = title.replace(/^(?:mcp__staf__|staf[:./])/, "");
+      const stafStep = describeStafTool(normalized, input);
+      if (stafStep) {
+        return {
+          ...base,
+          ...stafStep,
+          ...(status === "failed" && output ? { detail: truncate(output) } : {}),
+        };
+      }
       return { ...base, kind: "tool", title: `Used ${title}`, ...(output ? { detail: truncate(output) } : {}) };
+    }
   }
 }
 
