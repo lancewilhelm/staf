@@ -1,8 +1,12 @@
 {
   "name": "staf",
   "private": true,
+  "license": "MIT",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev": "bun run --cwd apps/server dev",
     "test": "bun test",

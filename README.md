@@ -61,3 +61,8 @@ Staf keeps everything in `~/.staf` (set `STAF_HOME` to change it). Edit
 
 The host listens only on 127.0.0.1 and has no login yet. Do not expose the port to a
 network until slice 6 adds sign-in.
+
+## License
+
+[MIT](LICENSE). Staf runs Codex, Claude Code, and Antigravity, which you install and sign
+in to yourself. Their own licenses and terms apply to them.
