@@ -376,6 +376,7 @@ textarea:focus-visible {
 }
 
 .thread-row {
+  position: relative;
   display: flex;
   align-items: center;
   border-radius: 10px;
@@ -422,36 +423,82 @@ textarea:focus-visible {
   text-overflow: ellipsis;
 }
 
+.thread-time {
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.12s;
+}
+
+.thread-time.working {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .thread-row.settled .thread-link {
   color: var(--muted);
+}
+
+.thread-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+.thread-row:hover .thread-actions,
+.thread-row:focus-within .thread-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.thread-row:hover .thread-time,
+.thread-row:focus-within .thread-time {
+  opacity: 0;
 }
 
 .thread-action,
 .thread-delete {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  margin-right: 2px;
-  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   color: var(--faint);
-  opacity: 0;
   flex-shrink: 0;
 }
 
-.thread-row:hover .thread-action,
-.thread-action:focus-visible,
-.thread-row:hover .thread-delete,
-.thread-delete:focus-visible {
-  opacity: 1;
-}
-
 .thread-action:hover {
+  background: var(--surface);
   color: var(--text);
 }
 
 .thread-delete:hover {
+  background: var(--surface);
   color: var(--error-text);
+}
+
+@media (hover: none) {
+  .thread-actions {
+    position: static;
+    transform: none;
+    margin-right: 2px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .thread-row:hover .thread-time,
+  .thread-row:focus-within .thread-time {
+    opacity: 1;
+  }
 }
 
 .schedule-mark {
@@ -475,7 +522,7 @@ textarea:focus-visible {
   vertical-align: 1px;
 }
 
-.sidebar-inbox-block {
+.sidebar-working-block {
   margin-bottom: 10px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
@@ -1363,6 +1410,18 @@ textarea:focus-visible {
   animation: pulse 1s ease-in-out infinite;
 }
 
+.thinking-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thinking-time {
+  font-size: 12.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .thinking {
   display: flex;
   gap: 5px;
@@ -1413,6 +1472,13 @@ textarea:focus-visible {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.activities-time {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .activities-toggle:hover {

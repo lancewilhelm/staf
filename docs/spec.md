@@ -135,10 +135,22 @@ the same way whichever harness made the call.
 - **Threads and Inbox** (slice 2): Every chat and every scheduled task run is a thread.
   Scheduled task runs carry a small schedule icon (such as a clock) so that they stand
   apart from threads that a person started. In **Settings → Appearance**, each person
-  chooses between **Inbox mode** (active threads and scheduled task runs stay in the
-  sidebar until settled, with settled history tucked away) and **Thread list mode** (a
-  chronological list of manual threads, with scheduled task runs kept in an Inbox
-  section so that automated runs do not clutter manual threads).
+  chooses between two sidebar modes:
+  - **Inbox mode:** threads that are answering right now sit in a **Working** section at
+    the top. The **Inbox** below holds only idle threads that nobody has settled yet, and
+    settled threads are tucked into a collapsible **Settled** section.
+  - **Thread list mode:** a typical chat list. Every thread, whether manual or scheduled,
+    running or idle, appears in one list sorted by last activity. Settling does not apply
+    in this mode, so the list has no Inbox or Settled sections.
+- **Time on threads:** each sidebar row shows a compact time. A running thread shows how
+  long it has been working (such as "3m"), and an idle thread shows how long ago it last
+  changed (such as "2h"). In a thread, the step summary and the thinking indicator show the
+  elapsed time of the answer.
+- **Turn stats:** Staf records stats for each answer in `staf.db`: duration, time to first
+  token, step count, the resolved model, the stop reason, and token usage and cost when the
+  harness reports them. The raw usage payload from each harness is kept only in the
+  database for later analysis. Clients receive the normalized stats on each message, but
+  the web app does not show them yet. Per-provider usage views come in a later slice.
 - **Agent panel** (slice 2): Each agent's own settings (profile, instructions, defaults,
   access summary, and scheduled tasks — and later memory and integrations) open in an
   agent-specific popup or drawer from the sidebar rather than crowding global Settings.
@@ -250,9 +262,12 @@ Each slice is used live before the next one starts.
        `settledAt` state to threads (`PATCH /api/threads/:id` with `settled`, automatic
        unsettle on reply, schedule clock icon on scheduled runs), and add the **Sidebar**
        mode selector in **Settings → Appearance** to switch between **Inbox mode**
-       (unsettled threads and scheduled runs together until settled, with settled threads
-       tucked away) and **Thread list mode** (chronological manual threads plus a separate
-       Inbox section for unsettled scheduled runs).
+       (a **Working** section for running threads, an **Inbox** of idle threads that are
+       not settled, and a collapsible **Settled** section) and **Thread list mode** (one
+       chronological list of every thread).
+     - **Working time and turn stats:** Show working time and thread age on sidebar
+       rows and elapsed time on answers, and store per-answer stats and raw harness usage
+       in `staf.db` (see **Interface**).
      - **Message attachments:** Store and serve files attached to messages in
        `~/.staf/attachments/` (`POST /api/threads/:id/attachments`,
        `POST /api/threads/:id/messages/:messageId/attachments`, `GET /api/attachments/:id`,

@@ -8,6 +8,7 @@ import {
   type Attachment,
   type Message,
   type MessageRole,
+  type MessageStats,
   type MessageStatus,
   type ScheduledTask,
   type ScheduledTaskRunStatus,
@@ -19,8 +20,13 @@ import {
   type UserPreferences,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const DEFAULT_PERSON_ID = "default";
+
+/** Full per-message metadata stored in SQLite, including raw provider fields not exposed to clients. */
+export interface StoredMessageMeta extends MessageStats {
+  providerMeta?: Record<string, unknown>;
+}
 
 interface ThreadRow {
   id: string;
@@ -35,6 +41,7 @@ interface ThreadRow {
   settled_at: number | null;
   session_id: string | null;
   status: ThreadStatus;
+  running_since: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -85,6 +92,7 @@ interface MessageRow {
   error: string | null;
   harness: string | null;
   model: string | null;
+  meta: string | null;
   created_at: number;
   completed_at: number | null;
 }
@@ -106,6 +114,7 @@ export interface MessagePatch {
   activities?: Activity[];
   status?: MessageStatus;
   error?: string | null;
+  meta?: StoredMessageMeta | null;
   completedAt?: number | null;
 }
 
@@ -134,6 +143,15 @@ export class Store {
     if (version < 4) this.migrateToV4();
     if (version < 5) this.migrateToV5();
     if (version < 6) this.migrateToV6();
+    if (version < 7) this.migrateToV7();
+  }
+
+  private migrateToV7(): void {
+    this.db.transaction(() => {
+      this.db.run("ALTER TABLE threads ADD COLUMN running_since INTEGER");
+      this.db.run("ALTER TABLE messages ADD COLUMN meta TEXT");
+      this.db.run("PRAGMA user_version = 7");
+    })();
   }
 
   private migrateToV6(): void {
@@ -273,7 +291,7 @@ export class Store {
          WHERE status = 'streaming'`,
       )
       .run({ now });
-    this.db.query("UPDATE threads SET status = 'idle' WHERE status = 'running'").run();
+    this.db.query("UPDATE threads SET status = 'idle', running_since = NULL WHERE status = 'running'").run();
     this.db
       .query(
         `UPDATE scheduled_tasks SET last_run_status = 'interrupted',
@@ -308,13 +326,14 @@ export class Store {
       settledAt: null,
       sessionId: null,
       status: "idle",
+      runningSince: null,
       createdAt: now,
       updatedAt: now,
     };
     this.db
       .query(
-        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, task_id, settled_at, session_id, status, created_at, updated_at)
-         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, $taskId, NULL, NULL, $status, $createdAt, $updatedAt)`,
+        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, task_id, settled_at, session_id, status, running_since, created_at, updated_at)
+         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, $taskId, NULL, NULL, $status, NULL, $createdAt, $updatedAt)`,
       )
       .run({
         id: thread.id,
@@ -358,6 +377,7 @@ export class Store {
       settledAt?: number | null;
       sessionId?: string | null;
       status?: ThreadStatus;
+      runningSince?: number | null;
       touch?: boolean;
     },
   ): StoredThread | null {
@@ -373,12 +393,13 @@ export class Store {
       settledAt: patch.settledAt === undefined ? current.settledAt : patch.settledAt,
       sessionId: patch.sessionId === undefined ? current.sessionId : patch.sessionId,
       status: patch.status ?? current.status,
+      runningSince: patch.runningSince === undefined ? current.runningSince : patch.runningSince,
       updatedAt: patch.touch ? Date.now() : current.updatedAt,
     };
     this.db
       .query(
         `UPDATE threads SET title = $title, harness = $harness, model = $model, effort = $effort, fast = $fast,
-           settled_at = $settledAt, session_id = $sessionId, status = $status, updated_at = $updatedAt WHERE id = $id`,
+           settled_at = $settledAt, session_id = $sessionId, status = $status, running_since = $runningSince, updated_at = $updatedAt WHERE id = $id`,
       )
       .run({
         id,
@@ -390,6 +411,7 @@ export class Store {
         settledAt: next.settledAt,
         sessionId: next.sessionId,
         status: next.status,
+        runningSince: next.runningSince,
         updatedAt: next.updatedAt,
       });
     return next;
@@ -479,10 +501,13 @@ export class Store {
     else next.error = error;
     if (completedAt === undefined) delete next.completedAt;
     else next.completedAt = completedAt;
+    const currentMeta = patch.meta === undefined ? this.getMessageMeta(id) : patch.meta;
+    if (currentMeta) next.stats = publicMessageStats(currentMeta);
+    else delete next.stats;
     this.db
       .query(
         `UPDATE messages SET text = $text, activities = $activities, status = $status,
-           error = $error, completed_at = $completedAt WHERE id = $id`,
+           error = $error, meta = $meta, completed_at = $completedAt WHERE id = $id`,
       )
       .run({
         id,
@@ -490,9 +515,18 @@ export class Store {
         activities: JSON.stringify(next.activities),
         status: next.status,
         error: next.error ?? null,
+        meta: currentMeta ? JSON.stringify(currentMeta) : null,
         completedAt: next.completedAt ?? null,
       });
     return next;
+  }
+
+  /** Reads the full stored metadata (including raw provider usage) for one message. */
+  getMessageMeta(id: string): StoredMessageMeta | null {
+    const row = this.db.query("SELECT meta FROM messages WHERE id = $id").get({ id }) as
+      | { meta: string | null }
+      | null;
+    return parseMessageMeta(row?.meta ?? null);
   }
 
   getMessage(id: string): Message | null {
@@ -814,6 +848,7 @@ function toThread(row: ThreadRow): StoredThread {
     settledAt: row.settled_at,
     sessionId: row.session_id,
     status: row.status,
+    runningSince: row.running_since,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -834,9 +869,29 @@ function toMessage(row: MessageRow, attachments: Attachment[]): Message {
     message.harness = row.harness;
     message.model = row.model;
   }
+  const meta = parseMessageMeta(row.meta);
+  if (meta) message.stats = publicMessageStats(meta);
   if (row.error !== null) message.error = row.error;
   if (row.completed_at !== null) message.completedAt = row.completed_at;
   return message;
+}
+
+function parseMessageMeta(raw: string | null): StoredMessageMeta | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as StoredMessageMeta;
+    }
+  } catch {
+    // Ignore malformed metadata rows.
+  }
+  return null;
+}
+
+function publicMessageStats(meta: StoredMessageMeta): MessageStats {
+  const { providerMeta: _providerMeta, ...stats } = meta;
+  return stats;
 }
 
 function attachmentUrl(id: string): string {

@@ -21,7 +21,7 @@ import {
 } from "./attachments.ts";
 import type { EventBus } from "./bus.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome } from "./harness/types.ts";
-import { publicAttachment, publicThread, type Store } from "./store.ts";
+import { publicAttachment, publicThread, type Store, type StoredMessageMeta } from "./store.ts";
 
 export class ChatError extends Error {
   constructor(
@@ -296,6 +296,7 @@ export class ChatService {
     });
     const updated = this.store.updateThread(threadId, {
       status: "running",
+      runningSince: assistantMessage.createdAt,
       settledAt: null,
       touch: true,
       ...(isFirst && thread.title === "New chat" ? { title: titleFrom(text || pendingAttachments[0]!.name) } : {}),
@@ -370,6 +371,7 @@ export class ChatService {
     const { threadId, message } = input;
     let text = "";
     const activities: Activity[] = [];
+    let firstTokenAt: number | null = null;
     let lastSave = Date.now();
     const live = { text, activities };
     this.live.set(message.id, live);
@@ -386,12 +388,14 @@ export class ChatService {
           this.store.addSession({ harness: input.harnessId, sessionId: event.sessionId, threadId });
           return;
         case "text":
+          if (firstTokenAt === null && event.text.length > 0) firstTokenAt = Date.now();
           text += event.text;
           live.text = text;
           this.bus.publish({ type: "message.delta", threadId, messageId: message.id, text: event.text });
           if (Date.now() - lastSave > SAVE_INTERVAL_MS) save();
           return;
         case "text.set":
+          if (firstTokenAt === null && event.text.length > 0) firstTokenAt = Date.now();
           text = event.text;
           live.text = text;
           this.bus.publish({ type: "message.text", threadId, messageId: message.id, text });
@@ -439,14 +443,30 @@ export class ChatService {
         };
       }
     }
+    const report = outcome.report;
+    const meta: StoredMessageMeta = {
+      durationMs: Math.max(0, now - message.createdAt),
+      ...(firstTokenAt !== null ? { firstTokenMs: Math.max(0, firstTokenAt - message.createdAt) } : {}),
+      ...(report?.apiDurationMs !== undefined ? { apiDurationMs: report.apiDurationMs } : {}),
+      stepCount: activities.length,
+      effort: input.effort,
+      fast: input.fast,
+      resolvedModel: report?.resolvedModel ?? input.model,
+      ...(report?.stopReason !== undefined ? { stopReason: report.stopReason } : {}),
+      ...(report?.turns !== undefined ? { turns: report.turns } : {}),
+      ...(report?.costUsd !== undefined ? { costUsd: report.costUsd } : {}),
+      ...(report?.usage ? { usage: report.usage } : {}),
+      ...(report?.providerMeta ? { providerMeta: report.providerMeta } : {}),
+    };
     const finished = this.store.updateMessage(message.id, {
       text,
       activities,
       status: outcome.status === "completed" ? "complete" : outcome.status,
       error: outcome.status === "failed" ? outcome.error : null,
+      meta,
       completedAt: now,
     });
-    const thread = this.store.updateThread(threadId, { status: "idle", touch: true });
+    const thread = this.store.updateThread(threadId, { status: "idle", runningSince: null, touch: true });
     if (finished) this.bus.publish({ type: "message.completed", message: finished });
     if (thread) this.bus.publish({ type: "thread.upserted", thread: publicThread(thread) });
   }

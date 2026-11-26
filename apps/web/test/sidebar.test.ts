@@ -3,9 +3,13 @@ import type { ThreadSummary } from "@staf/protocol";
 import {
   activeAgentId,
   agentInitial,
+  formatElapsedVerbose,
+  formatThreadAge,
+  formatWorkingDuration,
   groupThreads,
   partitionThreads,
   runningAgents,
+  threadTimeLabel,
   visibleThreads,
 } from "../src/sidebar.ts";
 import { DEFAULT_HERO_FONT, parseHeroFont } from "../src/theme.ts";
@@ -22,6 +26,7 @@ function makeThread(overrides: Partial<ThreadSummary> & { id: string }): ThreadS
     taskId: null,
     settledAt: null,
     status: "idle",
+    runningSince: null,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -94,22 +99,50 @@ describe("sidebar helpers", () => {
     expect(parseHeroFont(null)).toBe(DEFAULT_HERO_FONT);
   });
 
-  test("partitionThreads separates Inbox and Thread list sections cleanly", () => {
+  test("partitionThreads splits Inbox mode into Working, Inbox, and Settled", () => {
     const threads = [
       makeThread({ id: "chat-active", source: "chat", settledAt: null }),
+      makeThread({ id: "chat-running", source: "chat", status: "running", runningSince: 5 }),
       makeThread({ id: "chat-settled", source: "chat", settledAt: 100 }),
       makeThread({ id: "sched-active", source: "schedule", settledAt: null }),
       makeThread({ id: "sched-settled", source: "schedule", settledAt: 200 }),
     ];
-
     const inbox = partitionThreads(threads, "inbox");
-    expect(inbox.scheduledInbox).toEqual([]);
+    expect(inbox.working.map((t) => t.id)).toEqual(["chat-running"]);
     expect(inbox.main.map((t) => t.id)).toEqual(["chat-active", "sched-active"]);
     expect(inbox.settled.map((t) => t.id)).toEqual(["chat-settled", "sched-settled"]);
+  });
 
+  test("partitionThreads keeps every thread in one list in Thread list mode", () => {
+    const threads = [
+      makeThread({ id: "chat-running", status: "running", runningSince: 5 }),
+      makeThread({ id: "chat-settled", settledAt: 100 }),
+      makeThread({ id: "sched-active", source: "schedule" }),
+      makeThread({ id: "sched-settled", source: "schedule", settledAt: 200 }),
+    ];
     const list = partitionThreads(threads, "list");
-    expect(list.scheduledInbox.map((t) => t.id)).toEqual(["sched-active"]);
-    expect(list.main.map((t) => t.id)).toEqual(["chat-active", "chat-settled"]);
-    expect(list.settled.map((t) => t.id)).toEqual(["sched-settled"]);
+    expect(list.working).toEqual([]);
+    expect(list.settled).toEqual([]);
+    expect(list.main.map((t) => t.id)).toEqual(["chat-running", "chat-settled", "sched-active", "sched-settled"]);
+  });
+
+  test("time formatters give compact and verbose durations", () => {
+    expect(formatWorkingDuration(24_000)).toBe("24s");
+    expect(formatWorkingDuration(3 * 60_000 + 5_000)).toBe("3m");
+    expect(formatWorkingDuration(2 * 3_600_000)).toBe("2h");
+    const now = 10 * 24 * 3_600_000;
+    expect(formatThreadAge(now - 10_000, now)).toBe("now");
+    expect(formatThreadAge(now - 4 * 60_000, now)).toBe("4m");
+    expect(formatThreadAge(now - 3 * 24 * 3_600_000, now)).toBe("3d");
+    expect(formatThreadAge(now - 9 * 24 * 3_600_000, now)).toBe("1w");
+    expect(formatElapsedVerbose(18_000)).toBe("18s");
+    expect(formatElapsedVerbose(134_000)).toBe("2m 14s");
+    expect(formatElapsedVerbose(3_600_000 + 60_000)).toBe("1h 1m");
+  });
+
+  test("threadTimeLabel shows working time for running threads and age for idle ones", () => {
+    const now = 1_000_000;
+    expect(threadTimeLabel(makeThread({ id: "r", status: "running", runningSince: now - 90_000 }), now)).toBe("1m");
+    expect(threadTimeLabel(makeThread({ id: "i", updatedAt: now - 2 * 3_600_000 }), now)).toBe("2h");
   });
 });

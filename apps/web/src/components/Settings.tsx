@@ -133,12 +133,12 @@ const SIDEBAR_MODE_OPTIONS: Array<{ id: SidebarMode; label: string; hint: string
   {
     id: "inbox",
     label: "Inbox",
-    hint: "Active threads and scheduled runs stay in your Inbox until settled",
+    hint: "Active runs sit under Working; finished threads wait in your Inbox until settled",
   },
   {
     id: "list",
     label: "Thread list",
-    hint: "Chronological thread list, with scheduled runs in a separate Inbox section",
+    hint: "All threads and scheduled runs together in one chronological list",
   },
 ];
 
@@ -248,12 +248,14 @@ function MiniSidebar({ mode }: { mode: SidebarMode }) {
   }
   return (
     <span className="mini-sidebar">
-      <span className="mini-sidebar-head">Inbox</span>
+      <span className="mini-sidebar-head">Threads</span>
       <span className="mini-sidebar-row">
         <span className="mini-sidebar-dot" />
+        <span className="mini-sidebar-bar" />
+      </span>
+      <span className="mini-sidebar-row">
         <span className="mini-sidebar-bar short" />
       </span>
-      <span className="mini-sidebar-head">Threads</span>
       <span className="mini-sidebar-row">
         <span className="mini-sidebar-bar" />
       </span>

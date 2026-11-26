@@ -1,11 +1,12 @@
 import type { ThreadSummary } from "@staf/protocol";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   activeAgentId,
   agentInitial,
   groupThreads,
   partitionThreads,
   runningAgents,
+  threadTimeLabel,
   visibleThreads,
 } from "../sidebar.ts";
 import { deleteThread, openAgentPanel, openSettings, openThread, settleThread, startChat, useStore } from "../store.ts";
@@ -24,10 +25,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const currentAgent = agents.find((agent) => agent.id === currentAgentId) ?? null;
   const showingAll = showAll && agents.length > 1;
   const shownThreads = visibleThreads(threads, currentAgentId, showingAll);
-  const { scheduledInbox, main, settled } = partitionThreads(shownThreads, sidebarMode);
+  const { working, main, settled } = partitionThreads(shownThreads, sidebarMode);
   const running = runningAgents(threads);
   const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
   const isInboxMode = sidebarMode === "inbox";
+  const now = useNow(shownThreads.some((thread) => thread.status === "running") ? 1000 : 30_000);
 
   const go = (id: string) => {
     openThread(id);
@@ -46,7 +48,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const emptyMainText = (() => {
-    if (isInboxMode && settled.length > 0) {
+    if (isInboxMode && (settled.length > 0 || working.length > 0)) {
       return !showingAll && currentAgent && agents.length > 1
         ? `Inbox is clear for ${currentAgent.name}.`
         : "Inbox is clear.";
@@ -117,20 +119,21 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       </section>
 
       <nav className="thread-list" aria-label={isInboxMode ? "Inbox" : "Threads"}>
-        {!isInboxMode && scheduledInbox.length > 0 && (
-          <section className="sidebar-inbox-block" aria-label="Inbox">
+        {working.length > 0 && (
+          <section className="sidebar-working-block" aria-label="Working">
             <div className="sidebar-section-head">
               <h2>
-                Inbox <span className="sidebar-count">{scheduledInbox.length}</span>
+                Working <span className="sidebar-count">{working.length}</span>
               </h2>
             </div>
-            {scheduledInbox.map((thread) => (
+            {working.map((thread) => (
               <ThreadRow
                 key={thread.id}
                 thread={thread}
                 active={thread.id === current}
                 owner={showingAll ? agentNames.get(thread.agentId) : undefined}
-                showSettle
+                showSettle={false}
+                now={now}
                 onOpen={go}
               />
             ))}
@@ -162,7 +165,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {main.length === 0 ? (
           <p className="thread-empty">{emptyMainText}</p>
         ) : (
-          groupThreads(main).map(([label, items]) => (
+          groupThreads(main, now).map(([label, items]) => (
             <section key={label}>
               <h3>{label}</h3>
               {items.map((thread) => (
@@ -172,6 +175,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   active={thread.id === current}
                   owner={showingAll ? agentNames.get(thread.agentId) : undefined}
                   showSettle={isInboxMode}
+                  now={now}
                   onOpen={go}
                 />
               ))}
@@ -179,7 +183,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           ))
         )}
 
-        {settled.length > 0 && (
+        {isInboxMode && settled.length > 0 && (
           <section className="settled-group">
             <button
               type="button"
@@ -190,7 +194,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <span className="chevron" aria-hidden="true">
                 <Icon name="chevron" size={13} />
               </span>
-              <span>{isInboxMode ? "Settled" : "Settled runs"}</span>
+              <span>Settled</span>
               <span className="sidebar-count">{settled.length}</span>
             </button>
             {settledOpen && (
@@ -203,6 +207,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     owner={showingAll ? agentNames.get(thread.agentId) : undefined}
                     showSettle
                     muted
+                    now={now}
                     onOpen={go}
                   />
                 ))}
@@ -235,6 +240,7 @@ function ThreadRow({
   owner,
   showSettle,
   muted,
+  now,
   onOpen,
 }: {
   thread: ThreadSummary;
@@ -242,13 +248,15 @@ function ThreadRow({
   owner?: string;
   showSettle: boolean;
   muted?: boolean;
+  now: number;
   onOpen: (id: string) => void;
 }) {
   const isSettled = thread.settledAt !== null;
+  const isRunning = thread.status === "running";
   return (
     <div className={`thread-row${active ? " active" : ""}${muted ? " settled" : ""}`}>
       <button type="button" className="thread-link" onClick={() => onOpen(thread.id)}>
-        {thread.status === "running" && <span className="live-dot" aria-label="Answering" />}
+        {isRunning && <span className="live-dot" aria-label="Answering" />}
         {thread.source === "schedule" && (
           <span className="schedule-mark" title="Scheduled task" aria-label="Scheduled task">
             <Icon name="clock" size={13} />
@@ -258,29 +266,48 @@ function ThreadRow({
           <span className="thread-title">{thread.title}</span>
           {owner && <span className="thread-agent">{owner}</span>}
         </span>
+        <span
+          className={`thread-time${isRunning ? " working" : ""}`}
+          title={isRunning ? "Working for" : "Last activity"}
+        >
+          {threadTimeLabel(thread, now)}
+        </span>
       </button>
-      {showSettle && (
+      <span className="thread-actions">
+        {showSettle && (
+          <button
+            type="button"
+            className="thread-action"
+            aria-label={isSettled ? `Move "${thread.title}" to Inbox` : `Settle "${thread.title}"`}
+            title={isSettled ? "Move to Inbox" : "Settle"}
+            onClick={() => void settleThread(thread.id, !isSettled)}
+          >
+            <Icon name={isSettled ? "inbox" : "check"} size={14} />
+          </button>
+        )}
         <button
           type="button"
-          className="thread-action"
-          aria-label={isSettled ? `Move "${thread.title}" to Inbox` : `Settle "${thread.title}"`}
-          title={isSettled ? "Move to Inbox" : "Settle"}
-          onClick={() => void settleThread(thread.id, !isSettled)}
+          className="thread-delete"
+          aria-label={`Delete "${thread.title}"`}
+          title="Delete"
+          onClick={() => {
+            if (confirm(`Delete "${thread.title}"?`)) void deleteThread(thread.id);
+          }}
         >
-          <Icon name={isSettled ? "inbox" : "check"} size={14} />
+          <Icon name="trash" size={15} />
         </button>
-      )}
-      <button
-        type="button"
-        className="thread-delete"
-        aria-label={`Delete "${thread.title}"`}
-        title="Delete"
-        onClick={() => {
-          if (confirm(`Delete "${thread.title}"?`)) void deleteThread(thread.id);
-        }}
-      >
-        <Icon name="trash" size={15} />
-      </button>
+      </span>
     </div>
   );
+}
+
+/** The current time, refreshed on an interval so that relative labels stay current. */
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(id);
+  }, [intervalMs]);
+  return now;
 }

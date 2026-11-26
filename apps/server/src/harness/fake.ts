@@ -71,7 +71,15 @@ export class FakeHarness implements HarnessAdapter {
       if (await this.wait(delay, request.signal)) return { status: "interrupted" };
       request.emit({ type: "text", text: word });
     }
-    return { status: "completed" };
+    return {
+      status: "completed",
+      report: {
+        resolvedModel: request.model ?? "fake-small",
+        stopReason: "end_turn",
+        usage: { inputTokens: request.input.length, outputTokens: words.length, totalTokens: request.input.length + words.length },
+        providerMeta: { fake: true },
+      },
+    };
   }
 
   async close(): Promise<void> {}

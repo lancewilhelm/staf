@@ -1,5 +1,17 @@
-import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../agents.ts";
+
+/** Harness-reported timing, model, and usage metadata captured during a turn. */
+export interface TurnUsageReport {
+  apiDurationMs?: number;
+  resolvedModel?: string | null;
+  stopReason?: string | null;
+  turns?: number;
+  costUsd?: number;
+  usage?: TokenUsage;
+  /** Raw provider payload stored only in Staf's SQLite database for future analytics. */
+  providerMeta?: Record<string, unknown>;
+}
 
 /** Normalized events that every harness adapter emits while a turn runs. */
 export type HarnessEvent =
@@ -13,9 +25,9 @@ export type HarnessEvent =
   | { type: "activity"; activity: Activity };
 
 export type TurnOutcome =
-  | { status: "completed" }
-  | { status: "interrupted" }
-  | { status: "failed"; error: string };
+  | { status: "completed"; report?: TurnUsageReport }
+  | { status: "interrupted"; report?: TurnUsageReport }
+  | { status: "failed"; error: string; report?: TurnUsageReport };
 
 export interface TurnRequest {
   /** The harness session to continue, or null to start a new one. */

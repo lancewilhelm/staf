@@ -1,6 +1,7 @@
 import type { Message } from "@staf/protocol";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { renderMarkdown } from "../markdown.ts";
+import { formatElapsedVerbose } from "../sidebar.ts";
 import { Activities } from "./Activities.tsx";
 import { Attachments } from "./Attachments.tsx";
 import { Icon } from "./Icon.tsx";
@@ -19,19 +20,42 @@ export const MessageView = memo(function MessageView({ message }: { message: Mes
   return <AssistantMessage message={message} />;
 });
 
+function useStreamingElapsed(active: boolean, startedAt: number): number | undefined {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active, startedAt]);
+  return active ? Math.max(0, now - startedAt) : undefined;
+}
+
 function AssistantMessage({ message }: { message: Message }) {
   const streaming = message.status === "streaming";
   const html = useMemo(() => renderMarkdown(message.text), [message.text]);
   const thinking = streaming && !message.text && !message.activities.some((a) => a.status === "running");
+  const elapsedMs = useStreamingElapsed(streaming, message.createdAt);
 
   return (
     <div className="message assistant">
-      <Activities activities={message.activities} streaming={streaming} />
+      <Activities
+        activities={message.activities}
+        streaming={streaming}
+        startedAt={message.createdAt}
+        completedAt={message.completedAt}
+        elapsedMs={elapsedMs}
+      />
       {thinking && (
-        <div className="thinking" aria-label="Thinking">
-          <span />
-          <span />
-          <span />
+        <div className="thinking-row">
+          <div className="thinking" aria-label="Thinking">
+            <span />
+            <span />
+            <span />
+          </div>
+          {elapsedMs !== undefined && elapsedMs >= 1000 && (
+            <span className="thinking-time">{formatElapsedVerbose(elapsedMs)}</span>
+          )}
         </div>
       )}
       {message.text && (

@@ -1,43 +1,81 @@
 import type { SidebarMode, ThreadSummary } from "@staf/protocol";
 
 export interface SidebarSections {
-  /** Unsettled scheduled runs shown in a separate Inbox section in Thread list mode. */
-  scheduledInbox: ThreadSummary[];
-  /** Main list: unsettled threads in Inbox mode, or all manual threads in Thread list mode. */
+  /** Inbox mode only: threads that are answering right now. */
+  working: ThreadSummary[];
+  /** Inbox mode: idle threads that are not settled yet. Thread list mode: every thread. */
   main: ThreadSummary[];
-  /** Settled threads tucked into a collapsible section. */
+  /** Inbox mode only: settled idle threads. */
   settled: ThreadSummary[];
 }
 
 /**
  * Splits visible threads into sidebar sections for the chosen sidebar mode.
- * - Inbox mode: unsettled threads (manual and scheduled) stay in the main Inbox; settled ones tuck away.
- * - Thread list mode: manual threads stay chronological in Threads; unsettled scheduled runs sit in
- *   their own Inbox section above Threads, and settled scheduled runs tuck away below.
+ * - Inbox mode: running threads go to Working, idle threads that are not settled stay in the
+ *   Inbox, and settled threads go to the collapsible Settled section.
+ * - Thread list mode: every thread, manual or scheduled, running or idle, stays in one
+ *   chronological list. Settling does not apply in this mode.
  */
 export function partitionThreads(threads: ThreadSummary[], mode: SidebarMode): SidebarSections {
-  if (mode === "inbox") {
-    const main: ThreadSummary[] = [];
-    const settled: ThreadSummary[] = [];
-    for (const thread of threads) {
-      if (thread.settledAt === null) main.push(thread);
-      else settled.push(thread);
-    }
-    return { scheduledInbox: [], main, settled };
-  }
+  if (mode === "list") return { working: [], main: threads, settled: [] };
 
-  const scheduledInbox: ThreadSummary[] = [];
+  const working: ThreadSummary[] = [];
   const main: ThreadSummary[] = [];
   const settled: ThreadSummary[] = [];
   for (const thread of threads) {
-    if (thread.source === "schedule") {
-      if (thread.settledAt === null) scheduledInbox.push(thread);
-      else settled.push(thread);
-    } else {
-      main.push(thread);
-    }
+    if (thread.status === "running") working.push(thread);
+    else if (thread.settledAt !== null) settled.push(thread);
+    else main.push(thread);
   }
-  return { scheduledInbox, main, settled };
+  return { working, main, settled };
+}
+
+/**
+ * The short time label on a sidebar row: how long a running thread has been working, or how
+ * long ago an idle thread last changed.
+ */
+export function threadTimeLabel(thread: ThreadSummary, now: number): string {
+  if (thread.status === "running") {
+    return formatWorkingDuration(now - (thread.runningSince ?? thread.updatedAt));
+  }
+  return formatThreadAge(thread.updatedAt, now);
+}
+
+/** Compact elapsed time for a thread that is actively working, such as "24s", "3m", or "1h". */
+export function formatWorkingDuration(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/** Compact waiting age for an idle thread, such as "now", "4m", "2h", or "3d". */
+export function formatThreadAge(timestamp: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 60) return "now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  if (days < 30) return `${Math.floor(days / 7)}w`;
+  return `${Math.floor(days / 30)}mo`;
+}
+
+/** Readable duration for in-thread progress and completed step summaries, such as "18s" or "2m 14s". */
+export function formatElapsedVerbose(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
 }
 
 /**

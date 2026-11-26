@@ -25,6 +25,8 @@ export interface ThreadSummary {
   /** Unix time in milliseconds when this thread was settled, or null while active. */
   settledAt: number | null;
   status: ThreadStatus;
+  /** Unix time in milliseconds when the current active turn started, or null while idle. */
+  runningSince: number | null;
   /** Unix time in milliseconds. */
   createdAt: number;
   updatedAt: number;
@@ -73,6 +75,32 @@ export interface Attachment {
   createdAt: number;
 }
 
+/** Normalized token counts reported by a harness for one turn. */
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+  cacheCreationTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  contextWindow?: number;
+}
+
+/** Normalized timing and usage stats recorded for an assistant turn. */
+export interface MessageStats {
+  durationMs: number;
+  firstTokenMs?: number;
+  apiDurationMs?: number;
+  stepCount: number;
+  effort?: string | null;
+  fast?: boolean;
+  resolvedModel?: string | null;
+  stopReason?: string | null;
+  turns?: number;
+  costUsd?: number;
+  usage?: TokenUsage;
+}
+
 export interface Message {
   id: string;
   threadId: string;
@@ -87,6 +115,8 @@ export interface Message {
   /** For assistant messages: the harness and model that wrote the answer. */
   harness?: string;
   model?: string | null;
+  /** Optional normalized timing and usage metadata for completed assistant turns. */
+  stats?: MessageStats;
   createdAt: number;
   completedAt?: number;
 }

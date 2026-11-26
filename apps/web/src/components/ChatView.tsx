@@ -57,8 +57,7 @@ export function ChatView() {
     );
   }
 
-  const showThreadBar =
-    thread !== null && (sidebarMode === "inbox" || thread.source === "schedule" || thread.settledAt !== null);
+  const showThreadBar = thread !== null && sidebarMode === "inbox";
 
   return (
     <main className="chat">

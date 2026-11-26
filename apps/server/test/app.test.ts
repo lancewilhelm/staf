@@ -94,6 +94,33 @@ describe("chat over HTTP", () => {
     expect(detail.messages[1]!.status).toBe("interrupted");
   });
 
+  test("tracks when a turn started, and stores turn stats without the raw provider payload", async () => {
+    const { client, app } = start(new FakeHarness({ delayMs: 30 }));
+    const thread = await client.createThread();
+    expect(thread.runningSince).toBeNull();
+    await client.sendMessage(thread.id, "Hi");
+
+    const running = await client.getThread(thread.id);
+    expect(running.thread.status).toBe("running");
+    expect(running.thread.runningSince).toBe(running.messages[1]!.createdAt);
+
+    await app.chat.idle();
+    const detail = await client.getThread(thread.id);
+    expect(detail.thread).toMatchObject({ status: "idle", runningSince: null });
+    const answer = detail.messages[1]!;
+    expect(answer.stats).toMatchObject({
+      stepCount: 1,
+      resolvedModel: "fake-small",
+      stopReason: "end_turn",
+      usage: { inputTokens: 2, totalTokens: 5 },
+    });
+    expect(answer.stats!.durationMs).toBeGreaterThanOrEqual(answer.stats!.firstTokenMs!);
+    expect(answer.stats).not.toHaveProperty("providerMeta");
+    // The raw payload stays in the database for later analysis.
+    expect(app.store.getMessageMeta(answer.id)?.providerMeta).toEqual({ fake: true });
+    expect(detail.messages[0]!.stats).toBeUndefined();
+  });
+
   test("records a harness failure on the message", async () => {
     const { client, app } = start(new FakeHarness({ fail: "Codex is not signed in." }));
     const thread = await client.createThread();
@@ -567,6 +594,8 @@ describe("Store migration", () => {
     expect(user!.harness).toBeUndefined();
     expect(user!.attachments).toEqual([]);
     expect(assistant).toMatchObject({ harness: "codex", model: null, attachments: [] });
+    expect(store.getThread("t1")!.runningSince).toBeNull();
+    expect(assistant!.stats).toBeUndefined();
     expect(store.getPreferences()).toEqual({ theme: "system", heroFont: "bricolage", sidebarMode: "list" });
     expect(store.updatePreferences({ theme: "light" })).toEqual({
       theme: "light",

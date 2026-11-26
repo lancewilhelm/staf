@@ -71,7 +71,7 @@ describe("Antigravity over ACP", () => {
     const { adapter, workspace, sent } = setup();
     const { request, events } = turn(workspace);
 
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
 
     expect(events[0]).toEqual({ type: "session", sessionId: "session-1" });
     expect(answer(events)).toBe("It is sunny.");
@@ -96,7 +96,7 @@ describe("Antigravity over ACP", () => {
     const { adapter, workspace } = setup("write-outside");
     const { request, events } = turn(workspace);
 
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
     expect(titles(events)).toContain("failed: Edited x.txt");
     expect(answer(events)).toContain("Staf refused a step that is outside this agent's permissions");
   });
@@ -112,7 +112,7 @@ describe("Antigravity over ACP", () => {
     const { adapter, workspace, sent } = setup();
     const { request, events } = turn(workspace, { sessionId: "saved", model: "gemini-4-neon-low" });
 
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
 
     expect(events.some((event) => event.type === "session")).toBe(false);
     expect(answer(events)).toBe("It is sunny.");
@@ -128,7 +128,7 @@ describe("Antigravity over ACP", () => {
   test("starts a new session when the saved one is gone", async () => {
     const { adapter, workspace, sent } = setup("missing-session");
     const { request, events } = turn(workspace, { sessionId: "gone", inputWithHistory: "HISTORY + Weather?" });
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
     expect(events[0]).toEqual({ type: "session", sessionId: "session-1" });
     expect(sent().find((m) => m.method === "session/prompt")!.params.prompt[0].text).toBe("HISTORY + Weather?");
   });
@@ -139,7 +139,7 @@ describe("Antigravity over ACP", () => {
     const outcome = adapter.runTurn(request);
     await Bun.sleep(150);
     controller.abort();
-    expect(await outcome).toEqual({ status: "interrupted" });
+    expect(await outcome).toMatchObject({ status: "interrupted" });
     expect(sent().map((m) => m.method)).toContain("session/cancel");
   });
 

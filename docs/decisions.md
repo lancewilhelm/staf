@@ -3,6 +3,21 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-26: Thread list mode is one plain list, and the Inbox gets a Working section
+
+**Thread list mode** now shows every thread, manual or scheduled, in one list sorted by
+last activity, with no Inbox or Settled sections. **Inbox mode** moves threads that are
+answering into a **Working** section at the top, so that the Inbox holds only idle threads
+that still need attention. Sidebar rows show how long a thread has been working or how long
+ago it last changed. Staf also stores stats for each answer (timing, steps, model, and token
+usage) in `staf.db`, and keeps each harness's raw usage payload out of the API.
+
+Why: the earlier Thread list mode mixed in an Inbox section for scheduled runs and a
+"Settled runs" section, which made it neither a plain chat list nor a real inbox. Settling
+is an Inbox idea, so it now stays in Inbox mode. A thread that is still answering does not
+need attention yet, so it should not count as an Inbox item. Recording stats now, without
+showing them, means that usage views can be built later from real history.
+
 ## 2026-11-25: Scheduled tasks run on Codex or Claude, and missed recurring runs skip ahead on restart
 
 Scheduled tasks can run on Codex or Claude (with fast mode off by default), and Staf

@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import { VERSION } from "../../config.ts";
-import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest } from "../types.ts";
+import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest, TurnUsageReport } from "../types.ts";
 import type {
   AgentMessageDelta,
   ErrorNotification,
@@ -39,6 +39,9 @@ interface ActiveTurn {
   streamed: Set<string>;
   wroteAnswer: boolean;
   lastError: string | null;
+  report?: TurnUsageReport;
+  /** The thread's token totals before this turn, worked out from the first usage update. */
+  usageBase?: Record<string, number>;
   finish: (outcome: TurnOutcome) => void;
 }
 
@@ -421,16 +424,24 @@ export class CodexAdapter implements HarnessAdapter {
         if (!error.willRetry) turn.lastError = error.error.message;
         break;
       }
+      case "thread/tokenUsage/updated": {
+        const parsed = parseCodexUsage(params, turn.usageBase);
+        turn.usageBase = parsed.base;
+        turn.report = parsed.report;
+        break;
+      }
       case "turn/completed": {
         const { turn: done } = params as TurnCompletedNotification;
         if (turn.turnId && done.id !== turn.turnId) break;
-        if (done.status === "interrupted") turn.finish({ status: "interrupted" });
+        const report = turn.report ? { ...turn.report, stopReason: done.status } : { stopReason: done.status };
+        if (done.status === "interrupted") turn.finish({ status: "interrupted", report });
         else if (done.status === "failed") {
           turn.finish({
             status: "failed",
             error: done.error?.message ?? turn.lastError ?? "Codex could not finish the answer.",
+            report,
           });
-        } else turn.finish({ status: "completed" });
+        } else turn.finish({ status: "completed", report });
         break;
       }
     }
@@ -626,3 +637,57 @@ function describeSearch(
   return { kind: "page", title: "Read a page" };
 }
 
+const CODEX_TOKEN_FIELDS = [
+  ["inputTokens", "inputTokens"],
+  ["outputTokens", "outputTokens"],
+  ["cachedInputTokens", "cachedInputTokens"],
+  ["reasoningOutputTokens", "reasoningTokens"],
+  ["totalTokens", "totalTokens"],
+] as const;
+
+/**
+ * Reads a Codex `thread/tokenUsage/updated` notification. Codex reports the thread's running
+ * `total` and the `last` model call. A turn can make several model calls, so the turn's usage
+ * is the current total minus the total from before the turn. The first update of a turn gives
+ * that starting total: its `total` minus its `last`.
+ */
+export function parseCodexUsage(
+  params: unknown,
+  base?: Record<string, number>,
+): { report: TurnUsageReport; base?: Record<string, number> } {
+  const record = (value: unknown) =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+  const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+  const tokenUsage = record(record(params)?.tokenUsage) ?? {};
+  const total = record(tokenUsage.total);
+  const last = record(tokenUsage.last);
+
+  let start = base;
+  if (!start && total) {
+    start = {};
+    for (const [field] of CODEX_TOKEN_FIELDS) {
+      const value = num(total[field]);
+      if (value !== undefined) start[field] = Math.max(0, value - (num(last?.[field]) ?? 0));
+    }
+  }
+
+  const usage: TokenUsage = {};
+  const source = total ?? last;
+  if (source) {
+    for (const [field, key] of CODEX_TOKEN_FIELDS) {
+      const value = num(source[field]);
+      if (value === undefined) continue;
+      usage[key] = total && start ? Math.max(0, value - (start[field] ?? 0)) : value;
+    }
+  }
+  const contextWindow = num(tokenUsage.modelContextWindow);
+  if (contextWindow !== undefined) usage.contextWindow = contextWindow;
+
+  return {
+    report: {
+      ...(Object.keys(usage).length > 0 ? { usage } : {}),
+      ...(Object.keys(tokenUsage).length > 0 ? { providerMeta: { tokenUsage } } : {}),
+    },
+    ...(start ? { base: start } : {}),
+  };
+}

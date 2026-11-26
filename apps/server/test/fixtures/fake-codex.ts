@@ -52,6 +52,24 @@ async function runAnswer(threadId: string, turnId: string): Promise<void> {
     note("item/agentMessage/delta", { threadId, turnId, itemId: "msg-2", delta });
   }
   item(threadId, turnId, { ...answer, text: "AP leads with **news**." }, true);
+  // Two model calls in one turn, on a thread that had used 100 input tokens before it.
+  const breakdown = (input: number, output: number) => ({
+    inputTokens: input,
+    cachedInputTokens: 0,
+    outputTokens: output,
+    reasoningOutputTokens: 0,
+    totalTokens: input + output,
+  });
+  note("thread/tokenUsage/updated", {
+    threadId,
+    turnId,
+    tokenUsage: { total: breakdown(140, 10), last: breakdown(40, 10), modelContextWindow: 200000 },
+  });
+  note("thread/tokenUsage/updated", {
+    threadId,
+    turnId,
+    tokenUsage: { total: breakdown(200, 25), last: breakdown(60, 15), modelContextWindow: 200000 },
+  });
   completeTurn(threadId, turnId, "completed");
 }
 

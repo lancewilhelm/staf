@@ -168,7 +168,8 @@ chosen weekdays) at a local time of day, on a fixed minute or hour interval, or 
 chosen date and time.
 
 Each run creates a new thread marked with a clock icon so that it stands apart from manual
-chats and can be settled or replied to directly. Scheduled tasks run on ChatGPT (Codex) or
+chats. In Inbox mode, a finished run waits in the Inbox until you settle it or reply to it.
+In Thread list mode, runs sit in the same list as your chats, sorted by time. Scheduled tasks run on ChatGPT (Codex) or
 Claude; Staf refuses to schedule a task on Gemini (Antigravity) for now. Fast mode starts
 off on scheduled tasks so that automated runs do not silently spend extra usage.
 

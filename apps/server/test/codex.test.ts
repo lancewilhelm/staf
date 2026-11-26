@@ -58,7 +58,17 @@ describe("CodexAdapter", () => {
 
     const outcome = await adapter.runTurn(request);
 
-    expect(outcome).toEqual({ status: "completed" });
+    expect(outcome).toMatchObject({ status: "completed" });
+    // The turn's usage covers both model calls, not the thread's earlier usage.
+    expect(outcome.report?.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 25,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 125,
+      contextWindow: 200000,
+    });
+    expect(outcome.report?.stopReason).toBe("completed");
     expect(events[0]).toEqual({ type: "session", sessionId: "thread-1" });
     // Commentary becomes a step, not part of the answer.
     expect(text(events)).toBe("AP leads with **news**.");
@@ -117,7 +127,7 @@ describe("CodexAdapter", () => {
     const { adapter, requests } = setup();
     const { request, events } = turn({ sessionId: "thread-saved" });
 
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
 
     expect(events.some((event) => event.type === "session")).toBe(false);
     const methods = requests().map((r) => r.method);
@@ -130,7 +140,7 @@ describe("CodexAdapter", () => {
     const { adapter, requests } = setup("missing-thread");
     const { request, events } = turn({ sessionId: "thread-gone", inputWithHistory: "HISTORY + What leads AP?" });
 
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
     expect(events[0]).toEqual({ type: "session", sessionId: "thread-1" });
     // The new session gets the conversation so far.
     expect(requests().find((r) => r.method === "turn/start")!.params.input[0].text).toBe("HISTORY + What leads AP?");
@@ -144,7 +154,7 @@ describe("CodexAdapter", () => {
     await Bun.sleep(100);
     controller.abort();
 
-    expect(await outcome).toEqual({ status: "interrupted" });
+    expect(await outcome).toMatchObject({ status: "interrupted" });
     expect(requests().map((r) => r.method)).toContain("turn/interrupt");
   });
 

@@ -21,7 +21,7 @@ const sessionId = resume ?? "claude-session-1";
 const out = (message: Record<string, unknown>) => process.stdout.write(JSON.stringify(message) + "\n");
 const event = (value: Record<string, unknown>) => out({ type: "stream_event", event: value });
 
-out({ type: "system", subtype: "init", session_id: sessionId, tools: ["Bash"], mcp_servers: [] });
+out({ type: "system", subtype: "init", session_id: sessionId, model: "claude-test-1", tools: ["Bash"], mcp_servers: [] });
 
 if (scenario === "slow") {
   event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
@@ -53,4 +53,15 @@ event({ type: "content_block_start", index: 0, content_block: { type: "text", te
 event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "It is " } });
 event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Wednesday." } });
 out({ type: "assistant", message: { content: [{ type: "text", text: "It is Wednesday." }] } });
-out({ type: "result", subtype: "success", is_error: false, result: "It is Wednesday.", session_id: sessionId });
+out({
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  result: "It is Wednesday.",
+  session_id: sessionId,
+  duration_api_ms: 1200,
+  num_turns: 2,
+  total_cost_usd: 0.012,
+  stop_reason: "end_turn",
+  usage: { input_tokens: 30, output_tokens: 12, cache_read_input_tokens: 500, cache_creation_input_tokens: 0 },
+});

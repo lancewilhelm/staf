@@ -4,7 +4,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import { VERSION } from "../../config.ts";
 import {
@@ -17,7 +17,7 @@ import {
 } from "../activities.ts";
 import { RpcError, RpcProcess } from "../rpc.ts";
 import { groupLevels, resolveLevel } from "./levels.ts";
-import type { HarnessAdapter, TurnOutcome, TurnRequest } from "../types.ts";
+import type { HarnessAdapter, TurnOutcome, TurnRequest, TurnUsageReport } from "../types.ts";
 
 /** The parts of an ACP tool call that Staf reads. Updates may carry only some fields. */
 export interface AcpToolCall {
@@ -278,11 +278,12 @@ export class AcpAdapter implements HarnessAdapter {
     if (request.signal.aborted) onAbort();
 
     try {
-      const result = await rpc.request<{ stopReason: string }>("session/prompt", {
+      const result = await rpc.request<{ stopReason: string; usage?: Record<string, unknown> }>("session/prompt", {
         sessionId,
         prompt: [{ type: "text", text: input }],
       });
-      const outcome = outcomeFor(result.stopReason, request.signal.aborted);
+      const report = buildAcpReport(result, this.sessionModels.get(sessionId) ?? null);
+      const outcome = outcomeFor(result.stopReason, request.signal.aborted, report);
       if (outcome.status === "completed" && !turn.answer.text.trim() && turn.refused.length > 0) {
         // ACP agents end the turn when a permission is refused, without saying why.
         turn.answer.append(
@@ -447,10 +448,48 @@ export class AcpAdapter implements HarnessAdapter {
   }
 }
 
-function outcomeFor(stopReason: string, aborted: boolean): TurnOutcome {
-  if (stopReason === "cancelled" || aborted) return { status: "interrupted" };
-  if (stopReason === "refusal") return { status: "failed", error: "The model declined to answer." };
-  return { status: "completed" };
+function outcomeFor(stopReason: string, aborted: boolean, report?: TurnUsageReport): TurnOutcome {
+  if (stopReason === "cancelled" || aborted) return { status: "interrupted", ...(report ? { report } : {}) };
+  if (stopReason === "refusal") {
+    return { status: "failed", error: "The model declined to answer.", ...(report ? { report } : {}) };
+  }
+  return { status: "completed", ...(report ? { report } : {}) };
+}
+
+function buildAcpReport(
+  result: { stopReason: string; usage?: Record<string, unknown> },
+  resolvedModel: string | null,
+): TurnUsageReport {
+  const raw = result.usage && typeof result.usage === "object" ? result.usage : null;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const usage: TokenUsage | undefined = raw
+    ? {
+        ...(num(raw.inputTokens ?? raw.input_tokens) !== undefined
+          ? { inputTokens: num(raw.inputTokens ?? raw.input_tokens) }
+          : {}),
+        ...(num(raw.outputTokens ?? raw.output_tokens) !== undefined
+          ? { outputTokens: num(raw.outputTokens ?? raw.output_tokens) }
+          : {}),
+        ...(num(raw.cachedReadTokens ?? raw.cached_read_tokens) !== undefined
+          ? { cachedInputTokens: num(raw.cachedReadTokens ?? raw.cached_read_tokens) }
+          : {}),
+        ...(num(raw.cachedWriteTokens ?? raw.cached_write_tokens) !== undefined
+          ? { cacheCreationTokens: num(raw.cachedWriteTokens ?? raw.cached_write_tokens) }
+          : {}),
+        ...(num(raw.thoughtTokens ?? raw.reasoningTokens) !== undefined
+          ? { reasoningTokens: num(raw.thoughtTokens ?? raw.reasoningTokens) }
+          : {}),
+        ...(num(raw.totalTokens ?? raw.total_tokens) !== undefined
+          ? { totalTokens: num(raw.totalTokens ?? raw.total_tokens) }
+          : {}),
+      }
+    : undefined;
+  return {
+    ...(resolvedModel ? { resolvedModel } : {}),
+    stopReason: result.stopReason,
+    ...(usage && Object.keys(usage).length > 0 ? { usage } : {}),
+    ...(raw ? { providerMeta: { stopReason: result.stopReason, usage: raw } } : {}),
+  };
 }
 
 /**

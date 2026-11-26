@@ -59,7 +59,18 @@ describe("ClaudeAdapter", () => {
     const { adapter, dir, calls } = setup();
     const { request, events } = turn(dir);
 
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    const outcome = await adapter.runTurn(request);
+    expect(outcome).toMatchObject({
+      status: "completed",
+      report: {
+        apiDurationMs: 1200,
+        resolvedModel: "claude-test-1",
+        stopReason: "end_turn",
+        turns: 2,
+        costUsd: 0.012,
+        usage: { inputTokens: 30, outputTokens: 12, cachedInputTokens: 500, cacheCreationTokens: 0, totalTokens: 542 },
+      },
+    });
 
     expect(events[0]).toEqual({ type: "session", sessionId: "claude-session-1" });
     expect(answer(events)).toBe("It is Wednesday.");
@@ -78,7 +89,7 @@ describe("ClaudeAdapter", () => {
   test("resumes a saved session", async () => {
     const { adapter, dir, calls } = setup();
     const { request, events } = turn(dir, { sessionId: "saved-1" });
-    expect(await adapter.runTurn(request)).toEqual({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
     expect(events.some((e) => e.type === "session")).toBe(false);
     const args = calls()[0]!.args;
     expect(args[args.indexOf("--resume") + 1]).toBe("saved-1");
@@ -93,14 +104,14 @@ describe("ClaudeAdapter", () => {
     expect(calls()).toHaveLength(2);
     expect(calls()[1]!.args).not.toContain("--resume");
     expect(calls()[1]!.prompt).toBe("HISTORY + What day is it?");
-    expect(outcome).toEqual({ status: "completed" });
+    expect(outcome).toMatchObject({ status: "completed" });
     expect(events.find((e) => e.type === "session")).toEqual({ type: "session", sessionId: "claude-session-1" });
   });
 
   test("reports an error result", async () => {
     const { adapter, dir } = setup("error");
     const { request } = turn(dir);
-    expect(await adapter.runTurn(request)).toEqual({ status: "failed", error: "API overloaded" });
+    expect(await adapter.runTurn(request)).toMatchObject({ status: "failed", error: "API overloaded" });
   });
 
   test("interrupts the process when the signal aborts", async () => {
@@ -109,7 +120,7 @@ describe("ClaudeAdapter", () => {
     const outcome = adapter.runTurn(request);
     await Bun.sleep(300);
     controller.abort();
-    expect(await outcome).toEqual({ status: "interrupted" });
+    expect(await outcome).toMatchObject({ status: "interrupted" });
   });
 });
 

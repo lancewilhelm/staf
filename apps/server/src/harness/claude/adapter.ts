@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Activity, HarnessInfo, ModelInfo } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../../agents.ts";
 import {
   AnswerText,
@@ -14,7 +14,7 @@ import {
   truncate,
 } from "../activities.ts";
 import { lines } from "../rpc.ts";
-import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest } from "../types.ts";
+import type { HarnessAdapter, HarnessEvent, TurnOutcome, TurnRequest, TurnUsageReport } from "../types.ts";
 
 export interface ClaudeOptions {
   /** Command that starts Claude Code. Tests replace it with a fake. */
@@ -360,6 +360,7 @@ export class StreamReader {
   private readonly answer: AnswerText;
   private readonly tools = new Map<string, ToolState>();
   private sawDeltas = false;
+  private resolvedModel: string | null = null;
 
   constructor(
     private readonly emit: (event: HarnessEvent) => void,
@@ -373,6 +374,7 @@ export class StreamReader {
       case "system":
         if (message.subtype === "init" && typeof message.session_id === "string") {
           this.started = true;
+          if (typeof message.model === "string" && message.model) this.resolvedModel = message.model;
           if (message.session_id !== this.resumedSession) {
             this.emit({ type: "session", sessionId: message.session_id });
           }
@@ -381,9 +383,12 @@ export class StreamReader {
       case "stream_event":
         this.onStreamEvent(message.event as Record<string, unknown>);
         return;
-      case "assistant":
-        this.onAssistant(message.message as { content?: Array<Record<string, unknown>> });
+      case "assistant": {
+        const assistant = message.message as { model?: unknown; content?: Array<Record<string, unknown>> };
+        if (typeof assistant?.model === "string" && assistant.model) this.resolvedModel = assistant.model;
+        this.onAssistant(assistant);
         return;
+      }
       case "user":
         this.onUser(message.message as { content?: unknown });
         return;
@@ -445,17 +450,85 @@ export class StreamReader {
 
   private onResult(message: Record<string, unknown>): void {
     const text = typeof message.result === "string" ? message.result : "";
+    const report = parseClaudeResultReport(message, this.resolvedModel);
     if (message.subtype === "success" && message.is_error !== true) {
       if (!this.answer.text.trim() && text) this.answer.append(text);
-      this.outcome = { status: "completed" };
+      this.outcome = { status: "completed", report };
       return;
     }
     const errors = Array.isArray(message.errors) ? (message.errors as unknown[]).map(String).join("; ") : "";
     this.outcome = {
       status: "failed",
       error: text || errors || `Claude could not finish the answer (${String(message.subtype)}).`,
+      report,
     };
   }
+}
+
+function parseClaudeResultReport(
+  message: Record<string, unknown>,
+  resolvedModel: string | null,
+): TurnUsageReport {
+  const rawUsage = asRecord(message.usage);
+  const usage = parseClaudeUsage(rawUsage);
+  const modelUsage = asRecord(message.modelUsage);
+  const firstModel = modelUsage ? Object.keys(modelUsage)[0] ?? null : null;
+  const providerMeta: Record<string, unknown> = {};
+  for (const key of [
+    "subtype",
+    "stop_reason",
+    "duration_ms",
+    "duration_api_ms",
+    "num_turns",
+    "total_cost_usd",
+    "usage",
+    "modelUsage",
+  ]) {
+    if (message[key] !== undefined) providerMeta[key] = message[key];
+  }
+  return {
+    ...(typeof message.duration_api_ms === "number" ? { apiDurationMs: message.duration_api_ms } : {}),
+    ...(resolvedModel ?? firstModel ? { resolvedModel: resolvedModel ?? firstModel } : {}),
+    ...(typeof message.stop_reason === "string"
+      ? { stopReason: message.stop_reason }
+      : typeof message.subtype === "string"
+        ? { stopReason: message.subtype }
+        : {}),
+    ...(typeof message.num_turns === "number" ? { turns: message.num_turns } : {}),
+    ...(typeof message.total_cost_usd === "number" ? { costUsd: message.total_cost_usd } : {}),
+    ...(usage ? { usage } : {}),
+    ...(Object.keys(providerMeta).length > 0 ? { providerMeta } : {}),
+  };
+}
+
+function parseClaudeUsage(raw: Record<string, unknown> | null): TokenUsage | undefined {
+  if (!raw) return undefined;
+  const inputTokens = asNumber(raw.input_tokens);
+  const outputTokens = asNumber(raw.output_tokens);
+  const cachedInputTokens = asNumber(raw.cache_read_input_tokens);
+  const cacheCreationTokens = asNumber(raw.cache_creation_input_tokens);
+  const totalTokens =
+    inputTokens !== undefined || outputTokens !== undefined
+      ? (inputTokens ?? 0) + (outputTokens ?? 0) + (cachedInputTokens ?? 0) + (cacheCreationTokens ?? 0)
+      : undefined;
+  const usage: TokenUsage = {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cacheCreationTokens !== undefined ? { cacheCreationTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+  return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /** Maps a Claude Code tool call to a Staf step. */

@@ -1,15 +1,34 @@
 import type { Activity } from "@staf/protocol";
 import { useState } from "react";
+import { formatElapsedVerbose } from "../sidebar.ts";
 import { activityIcon, Icon } from "./Icon.tsx";
 
 /** One summary line for the steps behind an answer. It opens to show each step. */
-export function Activities({ activities, streaming }: { activities: Activity[]; streaming: boolean }) {
+export function Activities({
+  activities,
+  streaming,
+  startedAt,
+  completedAt,
+  elapsedMs,
+}: {
+  activities: Activity[];
+  streaming: boolean;
+  startedAt?: number;
+  completedAt?: number;
+  elapsedMs?: number;
+}) {
   const [open, setOpen] = useState(false);
   if (activities.length === 0) return null;
 
   const running = activities.findLast((activity) => activity.status === "running");
   const label = streaming && running ? `${running.title}…` : summarize(activities);
   const lead = running ?? activities[activities.length - 1]!;
+  const durationMs = streaming
+    ? elapsedMs
+    : startedAt !== undefined && completedAt !== undefined
+      ? Math.max(0, completedAt - startedAt)
+      : undefined;
+  const timeLabel = durationMs !== undefined && durationMs >= 1000 ? formatElapsedVerbose(durationMs) : null;
 
   return (
     <div className={`activities${open ? " open" : ""}`}>
@@ -21,6 +40,7 @@ export function Activities({ activities, streaming }: { activities: Activity[]; 
       >
         <Icon name={activityIcon[lead.kind]} size={15} />
         <span>{label}</span>
+        {timeLabel && <span className="activities-time">· {timeLabel}</span>}
         <span className="chevron">
           <Icon name="chevron" size={14} />
         </span>
