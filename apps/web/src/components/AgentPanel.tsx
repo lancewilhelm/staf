@@ -1,5 +1,5 @@
 import type { AgentSummary } from "@staf/protocol";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { agentInitial } from "../sidebar.ts";
 import {
   type AgentPanelSection,
@@ -8,15 +8,16 @@ import {
   closeAgentPanel,
   effortName,
   loadModels,
-  modelInfo,
+  modelName,
   openAgentPanel,
+  openSettings,
   removeAgent,
   saveAgent,
   useHarnesses,
   useStore,
 } from "../store.ts";
-import { FastSwitch } from "./ChatPill.tsx";
 import { Icon, type IconName } from "./Icon.tsx";
+import { ModelPickerPanel, type ModelPickerValue } from "./ModelPicker.tsx";
 
 const SECTIONS: Array<{ id: AgentPanelSection; label: string; icon: IconName }> = [
   { id: "profile", label: "Profile", icon: "user" },
@@ -33,7 +34,7 @@ export function AgentPanel({ view }: { view: AgentPanelView }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeAgentPanel();
+      if (event.key === "Escape" && !event.defaultPrevented) closeAgentPanel();
     };
     document.addEventListener("keydown", onKey);
     if (view.mode === "edit") dialog.current?.focus();
@@ -156,13 +157,65 @@ function AgentProfileForm({
   const [instructions, setInstructions] = useState(agent?.instructions ?? "");
   const [busy, setBusy] = useState(false);
 
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRoot = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
+
   useEffect(() => {
     void loadModels(harness);
   }, [harness]);
 
+  useLayoutEffect(() => {
+    if (!pickerOpen) return;
+    const measure = () => {
+      const box = pickerRoot.current?.getBoundingClientRect();
+      if (!box) return;
+      setRoom(Math.max(220, window.innerHeight - box.bottom - 80));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    void loadModels(harness);
+    const onDown = (event: PointerEvent) => {
+      if (!pickerRoot.current?.contains(event.target as Node)) setPickerOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [pickerOpen, harness]);
+
   const info = harnesses.find((h) => h.id === harness);
   const list = models[harness];
-  const chosen = modelInfo(models, harness, model);
+  const defaultModel = list?.status === "ready" ? list.list.find((m) => m.isDefault) : undefined;
+  const resolvedModel = modelName(models, harness, model) ?? (defaultModel ? `Default · ${defaultModel.name}` : "Provider's default");
+  const summaryParts = [
+    info?.label ?? harness,
+    resolvedModel,
+    effort ? effortName(effort) : null,
+    fast ? "Fast" : null,
+  ].filter(Boolean);
+
+  const applyChoice = (change: Partial<ModelPickerValue>) => {
+    if (change.harness !== undefined) setHarness(change.harness);
+    if (change.model !== undefined) setModel(change.model);
+    if (change.effort !== undefined) setEffort(change.effort);
+    if (change.fast !== undefined) setFast(change.fast);
+  };
+
   const changed =
     !agent ||
     name !== agent.name ||
@@ -214,77 +267,60 @@ function AgentProfileForm({
           />
         </label>
 
-        <div className="field-row">
-          <label className="field">
-            <span>Default provider</span>
-            <select
-              value={harness}
-              onChange={(e) => {
-                setHarness(e.target.value);
-                setModel(null);
-                setEffort(null);
-                setFast(false);
-              }}
+        <div className="field">
+          <span>Default model</span>
+          <div className="agent-model-picker" ref={pickerRoot}>
+            <button
+              type="button"
+              className={`model-trigger${pickerOpen ? " open" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={pickerOpen}
+              onClick={() => setPickerOpen((open) => !open)}
             >
-              {harnesses.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.label}
-                  {h.experimental ? " (experimental)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Default model</span>
-            <select
-              value={model ?? ""}
-              onChange={(e) => {
-                const next = e.target.value || null;
-                const nextInfo = modelInfo(models, harness, next);
-                setModel(next);
-                if (effort && !nextInfo?.efforts?.includes(effort)) setEffort(null);
-                if (fast && !nextInfo?.fast) setFast(false);
-              }}
-            >
-              <option value="">Provider's default</option>
-              {list?.status === "ready" &&
-                list.list.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              {model && list?.status !== "ready" && <option value={model}>{model}</option>}
-            </select>
-          </label>
-        </div>
-
-        {(chosen?.efforts || chosen?.fast) && (
-          <div className="field-row">
-            {chosen.efforts && (
-              <label className="field">
-                <span>Default reasoning</span>
-                <select value={effort ?? ""} onChange={(e) => setEffort(e.target.value || null)}>
-                  <option value="">
-                    Model's default{chosen.defaultEffort ? ` (${effortName(chosen.defaultEffort)})` : ""}
-                  </option>
-                  {chosen.efforts.map((level) => (
-                    <option key={level} value={level}>
-                      {effortName(level)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {chosen.fast && (
-              <div className="field">
-                <span>Speed</span>
-                <FastSwitch info={chosen} value={fast} onChange={setFast} />
+              <span className="model-trigger-label">
+                <span>{summaryParts.join(" · ")}</span>
+                {info?.experimental && <span className="tag">Experimental</span>}
+              </span>
+              <span className="model-trigger-chevron" aria-hidden="true">
+                <Icon name="down" size={15} />
+              </span>
+            </button>
+            {pickerOpen && (
+              <div
+                className="menu wide down agent-model-menu"
+                role="menu"
+                style={room ? { maxHeight: Math.min(460, room) } : undefined}
+              >
+                <ModelPickerPanel
+                  value={{ harness, model, effort, fast }}
+                  harnesses={harnesses}
+                  models={models}
+                  allowUnreadyProviders
+                  onChange={applyChoice}
+                  footer={
+                    <div className="menu-footer-row">
+                      <button
+                        type="button"
+                        className="menu-footer-link"
+                        onClick={() => {
+                          setPickerOpen(false);
+                          openSettings({ section: "providers" });
+                        }}
+                      >
+                        <Icon name="settings" size={14} />
+                        Provider settings
+                      </button>
+                      <button type="button" className="menu-footer-done" onClick={() => setPickerOpen(false)}>
+                        Done
+                      </button>
+                    </div>
+                  }
+                />
               </div>
             )}
           </div>
-        )}
-        {info?.note && <p className="field-note">{info.note}</p>}
-        {list?.status === "error" && <p className="field-note error">{list.error}</p>}
+          {!pickerOpen && list?.status === "error" && <p className="field-note error model-note">{list.error}</p>}
+        </div>
 
         <label className="field">
           <span>Instructions</span>

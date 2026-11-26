@@ -1,16 +1,17 @@
-import type { HarnessInfo, ModelInfo } from "@staf/protocol";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   choose,
   effortName,
   loadModels,
-  modelInfo,
   modelName,
   openSettings,
   useHarnesses,
   useStore,
 } from "../store.ts";
 import { Icon } from "./Icon.tsx";
+import { EffortPicker, FastSwitch, ModelPickerPanel } from "./ModelPicker.tsx";
+
+export { EffortPicker, FastSwitch };
 
 /**
  * The small pill under the composer. It shows which provider, model, reasoning level,
@@ -34,7 +35,6 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
   const fast = thread ? thread.fast : (draft.fast ?? agent?.fast ?? false);
   const harness = harnesses.find((h) => h.id === harnessId) ?? null;
   const running = thread?.status === "running";
-  const info = modelInfo(models, harnessId, model);
 
   useEffect(() => {
     // Model names for the label come from the list, so load it once.
@@ -79,18 +79,6 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
   ]
     .filter(Boolean)
     .join(" · ");
-  const list = models[harnessId];
-  const defaultModel = list?.status === "ready" ? list.list.find((m) => m.isDefault) : undefined;
-
-  /** Keeps the level and fast mode when the new model offers them. */
-  const pickModel = (next: string | null) => {
-    const nextInfo = modelInfo(models, harnessId, next);
-    void choose({
-      model: next,
-      effort: effort && nextInfo?.efforts?.includes(effort) ? effort : null,
-      fast: fast && nextInfo?.fast === true,
-    });
-  };
 
   return (
     <div className="pill-root" ref={root}>
@@ -108,169 +96,33 @@ export function ChatPill({ direction }: { direction: "up" | "down" }) {
         <Icon name="down" size={14} />
       </button>
       {open && (
-        <div className={`menu wide ${direction}`} role="menu" style={room ? { maxHeight: Math.min(560, room) } : undefined}>
-          <div className="menu-columns">
-            <div className="menu-column">
-              <section>
-                <h3>Provider</h3>
-                {harnesses.map((h) => (
-                  <MenuItem
-                    key={h.id}
-                    selected={h.id === harnessId}
-                    disabled={!h.ready}
-                    hint={!h.ready ? (h.detail ?? "Not ready") : undefined}
-                    onClick={() => {
-                      if (h.id !== harnessId) void choose({ harness: h.id, model: null, effort: null, fast: false });
-                    }}
-                  >
-                    {h.label}
-                    {h.experimental && <span className="tag">Experimental</span>}
-                  </MenuItem>
-                ))}
-              </section>
-              <section className="models">
-                <h3>Model</h3>
-                <MenuItem selected={model === null} onClick={() => pickModel(null)}>
-                  Default{defaultModel ? <span className="muted"> · {defaultModel.name}</span> : null}
-                </MenuItem>
-                {list?.status === "loading" && <p className="menu-status">Loading models…</p>}
-                {list?.status === "error" && <p className="menu-status error">{list.error}</p>}
-                {list?.status === "ready" &&
-                  list.list.map((m) => (
-                    <MenuItem key={m.id} selected={m.id === model} onClick={() => pickModel(m.id)}>
-                      {m.name}
-                    </MenuItem>
-                  ))}
-              </section>
-            </div>
-            <div className="menu-column side">
-              {info?.efforts && (
-                <section>
-                  <h3>Reasoning</h3>
-                  <EffortPicker info={info} value={effort} onChange={(next) => void choose({ effort: next })} />
-                </section>
-              )}
-              {info?.fast && (
-                <section>
-                  <FastSwitch info={info} value={fast} onChange={(next) => void choose({ fast: next })} />
-                </section>
-              )}
-              <ProviderNote harness={harness} switching={thread !== null} />
-            </div>
-          </div>
-          <button
-            type="button"
-            className="menu-footer"
-            onClick={() => {
-              setOpen(false);
-              openSettings({ section: "providers" });
-            }}
-          >
-            <Icon name="settings" size={15} />
-            Provider settings
-          </button>
+        <div
+          className={`menu wide ${direction}`}
+          role="menu"
+          style={room ? { maxHeight: Math.min(560, room) } : undefined}
+        >
+          <ModelPickerPanel
+            value={{ harness: harnessId, model, effort, fast }}
+            harnesses={harnesses}
+            models={models}
+            switching={thread !== null}
+            onChange={(change) => void choose(change)}
+            footer={
+              <button
+                type="button"
+                className="menu-footer"
+                onClick={() => {
+                  setOpen(false);
+                  openSettings({ section: "providers" });
+                }}
+              >
+                <Icon name="settings" size={15} />
+                Provider settings
+              </button>
+            }
+          />
         </div>
       )}
     </div>
-  );
-}
-
-/** A row of levels. "Default" names the model's own level when the harness reports it. */
-export function EffortPicker({
-  info,
-  value,
-  onChange,
-}: {
-  info: ModelInfo;
-  value: string | null;
-  onChange: (effort: string | null) => void;
-}) {
-  const levels = info.efforts ?? [];
-  const current = value && levels.includes(value) ? value : null;
-  return (
-    <div className="segments" role="radiogroup" aria-label="Reasoning">
-      <button
-        type="button"
-        role="radio"
-        aria-checked={current === null}
-        className={current === null ? "selected" : ""}
-        title={info.defaultEffort ? `The model's default, ${effortName(info.defaultEffort)}` : "The model's default"}
-        onClick={() => onChange(null)}
-      >
-        Default
-      </button>
-      {levels.map((level) => (
-        <button
-          key={level}
-          type="button"
-          role="radio"
-          aria-checked={current === level}
-          className={current === level ? "selected" : ""}
-          onClick={() => onChange(level)}
-        >
-          {effortName(level)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** The fast mode switch, with what it costs. */
-export function FastSwitch({
-  info,
-  value,
-  onChange,
-}: {
-  info: ModelInfo;
-  value: boolean;
-  onChange: (fast: boolean) => void;
-}) {
-  return (
-    <button type="button" role="switch" aria-checked={value} className="toggle-row" onClick={() => onChange(!value)}>
-      <span className="menu-label">
-        Fast mode
-        {info.fastNote && <span className="toggle-note">{info.fastNote}</span>}
-      </span>
-      <span className={`toggle${value ? " on" : ""}`} aria-hidden="true" />
-    </button>
-  );
-}
-
-function ProviderNote({ harness, switching }: { harness: HarnessInfo | null; switching: boolean }) {
-  if (!harness?.note && !switching) return null;
-  return (
-    <div className="menu-note">
-      {harness?.note && <p>{harness.note}</p>}
-      {switching && <p>A new provider gets the conversation so far as text, without the details of earlier steps.</p>}
-    </div>
-  );
-}
-
-function MenuItem({
-  selected,
-  disabled,
-  hint,
-  onClick,
-  children,
-}: {
-  selected: boolean;
-  disabled?: boolean;
-  hint?: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={selected}
-      className={`menu-item${selected ? " selected" : ""}`}
-      disabled={disabled}
-      title={hint}
-      onClick={onClick}
-    >
-      <span className="menu-label">{children}</span>
-      {selected && <Icon name="check" size={15} />}
-    </button>
   );
 }

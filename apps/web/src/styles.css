@@ -1831,6 +1831,107 @@ button.link {
   flex-shrink: 0;
 }
 
+.agent-model-picker {
+  position: relative;
+}
+
+.model-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+}
+
+.model-trigger:hover,
+.model-trigger.open {
+  border-color: var(--muted);
+}
+
+.model-trigger-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-trigger-label > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-trigger-label .tag {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+.model-trigger-chevron {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.model-trigger.open .model-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+.agent-model-menu {
+  width: 100% !important;
+  z-index: 45;
+}
+
+.menu-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.menu-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.menu-footer-link:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.menu-footer-done {
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.menu-footer-done:hover {
+  opacity: 0.88;
+}
+
+.model-note {
+  margin-top: 2px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -1868,13 +1969,6 @@ button.link {
 .field textarea:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 1px;
-}
-
-.field .toggle-row {
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--bg);
 }
 
 .field-row {
