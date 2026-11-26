@@ -1,5 +1,12 @@
 import { createInterface } from "node:readline/promises";
-import { type Activity, type Message, StafApiError, StafClient } from "@staf/protocol";
+import {
+  isMemoryBlock,
+  memoryBlockLabel,
+  type Activity,
+  type Message,
+  StafApiError,
+  StafClient,
+} from "@staf/protocol";
 import { resolvePaths, resolveServerUrl } from "../config.ts";
 import { CodexAdapter } from "../harness/codex/adapter.ts";
 import { streamAnswer, type AnswerOutput } from "./stream.ts";
@@ -220,4 +227,157 @@ export async function apps(args: string[]): Promise<number> {
   } finally {
     await adapter.close();
   }
+}
+
+const MEMORY_HELP = `Usage:
+  staf memory [list] [--agent <id>]
+  staf memory add [--agent <id>] <notes|profile> "<text>"
+  staf memory edit <id> "<text>"
+  staf memory rm <id>
+  staf memory approve <id> ["<text>"]
+  staf memory reject <id>
+  staf memory limits [--agent <id>] [--notes <chars>] [--profile <chars>] [--nudge <count>]
+`;
+
+export async function memory(args: string[]): Promise<number> {
+  let agentId = "default";
+  let notesLimit: number | undefined;
+  let profileLimit: number | undefined;
+  let nudgeInterval: number | undefined;
+  const rest: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--agent") agentId = args[++i] ?? agentId;
+    else if (arg === "--notes") notesLimit = parseIntFlag("--notes", args[++i]);
+    else if (arg === "--profile") profileLimit = parseIntFlag("--profile", args[++i]);
+    else if (arg === "--nudge") nudgeInterval = parseIntFlag("--nudge", args[++i]);
+    else rest.push(arg);
+  }
+
+  const [sub = "list", ...subArgs] = rest;
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    process.stdout.write(MEMORY_HELP);
+    return 0;
+  }
+
+  const api = await connect();
+
+  switch (sub) {
+    case "list": {
+      const snap = await api.getAgentMemory(agentId);
+      process.stdout.write(
+        bold(`Memory for ${snap.agentId}`) +
+          dim(
+            `  (Notes ${snap.usage.notes.used}/${snap.usage.notes.limit} chars · Profile ${snap.usage.profile.used}/${snap.usage.profile.limit} chars · Reminder every ${snap.settings.nudgeInterval || "off"} messages)\n`,
+          ),
+      );
+      if (snap.proposed.length > 0) {
+        process.stdout.write(`\n${bold("Pending proposals")}\n`);
+        for (const item of snap.proposed) {
+          const action = item.proposedAction ?? "add";
+          process.stdout.write(
+            `  ${item.id.slice(0, 8)}  [${action} · ${memoryBlockLabel(item.block)}]  ${item.text}\n`,
+          );
+          if (item.targetText) process.stdout.write(dim(`    replaces: ${item.targetText}\n`));
+          if (item.flaggedReason) process.stdout.write(dim(`    warning: ${item.flaggedReason}\n`));
+        }
+      }
+      for (const block of ["profile", "notes"] as const) {
+        const items = snap.active.filter((e) => e.block === block);
+        process.stdout.write(`\n${bold(memoryBlockLabel(block))}\n`);
+        if (items.length === 0) {
+          process.stdout.write(dim("  (empty)\n"));
+        } else {
+          for (const item of items) {
+            process.stdout.write(`  ${item.id.slice(0, 8)}  ${item.text}\n`);
+            if (item.flaggedReason) {
+              process.stdout.write(dim(`    [withheld from model: ${item.flaggedReason}]\n`));
+            }
+          }
+        }
+      }
+      return 0;
+    }
+    case "add": {
+      const [block, ...words] = subArgs;
+      const text = words.join(" ").trim();
+      if (!isMemoryBlock(block) || !text) {
+        throw new CliError('Usage: staf memory add [--agent <id>] <notes|profile> "<text>"');
+      }
+      const created = await api.createMemory(agentId, { block, text });
+      process.stdout.write(`Saved ${created.id.slice(0, 8)} in ${memoryBlockLabel(block)}.\n`);
+      return 0;
+    }
+    case "edit": {
+      const [idOrPrefix, ...words] = subArgs;
+      const text = words.join(" ").trim();
+      if (!idOrPrefix || !text) throw new CliError('Usage: staf memory edit <id> "<text>"');
+      const id = await resolveMemoryId(api, agentId, idOrPrefix);
+      await api.updateMemory(id, { text });
+      process.stdout.write(`Updated ${id.slice(0, 8)}.\n`);
+      return 0;
+    }
+    case "rm":
+    case "remove":
+    case "delete": {
+      const idOrPrefix = subArgs[0];
+      if (!idOrPrefix) throw new CliError("Usage: staf memory rm <id>");
+      const id = await resolveMemoryId(api, agentId, idOrPrefix);
+      await api.deleteMemory(id);
+      process.stdout.write(`Removed ${id.slice(0, 8)}.\n`);
+      return 0;
+    }
+    case "approve": {
+      const [idOrPrefix, ...words] = subArgs;
+      if (!idOrPrefix) throw new CliError('Usage: staf memory approve <id> ["<text>"]');
+      const id = await resolveMemoryId(api, agentId, idOrPrefix);
+      const edited = words.join(" ").trim();
+      await api.approveMemory(id, edited ? { text: edited } : {});
+      process.stdout.write(`Approved ${id.slice(0, 8)}.\n`);
+      return 0;
+    }
+    case "reject": {
+      const idOrPrefix = subArgs[0];
+      if (!idOrPrefix) throw new CliError("Usage: staf memory reject <id>");
+      const id = await resolveMemoryId(api, agentId, idOrPrefix);
+      await api.rejectMemory(id);
+      process.stdout.write(`Rejected ${id.slice(0, 8)}.\n`);
+      return 0;
+    }
+    case "limits": {
+      const patch = {
+        ...(notesLimit !== undefined ? { notesLimit } : {}),
+        ...(profileLimit !== undefined ? { profileLimit } : {}),
+        ...(nudgeInterval !== undefined ? { nudgeInterval } : {}),
+      };
+      if (Object.keys(patch).length > 0) {
+        await api.updateAgent(agentId, { memory: patch });
+      }
+      const snap = await api.getAgentMemory(agentId);
+      process.stdout.write(
+        `Notes limit: ${snap.settings.notesLimit} chars\nProfile limit: ${snap.settings.profileLimit} chars\nReminder interval: ${snap.settings.nudgeInterval} messages\n`,
+      );
+      return 0;
+    }
+    default:
+      throw new CliError(`Unknown memory subcommand "${sub}".\n\n${MEMORY_HELP}`);
+  }
+}
+
+function parseIntFlag(flag: string, value: string | undefined): number {
+  const n = Number(value);
+  if (!value || !Number.isInteger(n)) throw new CliError(`${flag} requires a whole number.`);
+  return n;
+}
+
+/** Resolves a full memory ID or unique short prefix (such as the 8-char ID printed by `staf memory list`). */
+async function resolveMemoryId(api: StafClient, agentId: string, idOrPrefix: string): Promise<string> {
+  if (idOrPrefix.length >= 32) return idOrPrefix;
+  const snap = await api.getAgentMemory(agentId);
+  const all = [...snap.active, ...snap.proposed];
+  const matches = all.filter((entry) => entry.id === idOrPrefix || entry.id.startsWith(idOrPrefix));
+  if (matches.length === 1) return matches[0]!.id;
+  if (matches.length > 1) throw new CliError(`Multiple memories start with "${idOrPrefix}". Pass more characters.`);
+  return idOrPrefix;
 }

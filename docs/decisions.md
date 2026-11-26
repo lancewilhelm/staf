@@ -3,6 +3,21 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-26: Memory snapshots freeze per thread, and scheduled runs can only propose changes
+
+Staf copies an agent's active `profile` and `notes` memory blocks into `threads.memory_snapshot`
+when a conversation starts, so that every turn in that thread (including process-per-turn
+Claude Code turns) sees the same memory snapshot while new memories apply to future threads.
+In the `memory` MCP tool, Staf enforces trust strictly from the run token's `trigger`:
+interactive chat turns can update active memory directly (within character limits and after
+prompt-injection scanning), whereas scheduled runs can only create `proposed` entries that
+surface as inline Approve / Edit / Reject cards inside the run's thread, the Inbox, and
+the agent's **Memory** tab.
+
+Why: freezing memory per thread keeps harness instructions and prompt caches stable during
+a conversation, and enforcing proposals from the host's run token prevents prompt
+injections in unattended scheduled runs from planting persistent instructions.
+
 ## 2026-11-26: Claude Code uses explicit isolation flags instead of `--safe-mode` so Staf's MCP bridge can load
 
 Staf's probe against Claude Code 2.1.332 showed that `--safe-mode` ignores `--mcp-config`

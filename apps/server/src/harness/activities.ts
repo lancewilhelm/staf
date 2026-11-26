@@ -112,6 +112,14 @@ export function describeStafTool(
         title: query ? `Searched past conversations: ${query}` : "Searched past conversations",
       };
     }
+    case "memory": {
+      const action = str("action");
+      if (action === "list") return { kind: "note", title: "Checked saved memory" };
+      if (action === "add") return { kind: "note", title: "Saved a memory" };
+      if (action === "replace") return { kind: "note", title: "Updated a memory" };
+      if (action === "remove") return { kind: "note", title: "Removed a memory" };
+      return { kind: "note", title: "Used memory" };
+    }
     default:
       return null;
   }

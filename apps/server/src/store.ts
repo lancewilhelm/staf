@@ -6,6 +6,11 @@ import {
   isThemePreference,
   type Activity,
   type Attachment,
+  type MemoryBlock,
+  type MemoryEntry,
+  type MemoryProposalAction,
+  type MemorySource,
+  type MemoryStatus,
   type Message,
   type MessageRole,
   type MessageStats,
@@ -20,7 +25,7 @@ import {
   type UserPreferences,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 const DEFAULT_PERSON_ID = "default";
 
 /** Full per-message metadata stored in SQLite, including raw provider fields not exposed to clients. */
@@ -40,8 +45,25 @@ interface ThreadRow {
   task_id: string | null;
   settled_at: number | null;
   session_id: string | null;
+  memory_snapshot: string | null;
   status: ThreadStatus;
   running_since: number | null;
+  created_at: number;
+  updated_at: number;
+  pending_proposals?: number;
+}
+
+interface MemoryRow {
+  id: string;
+  agent_id: string;
+  block: MemoryBlock;
+  text: string;
+  status: MemoryStatus;
+  proposed_action: MemoryProposalAction | null;
+  target_id: string | null;
+  source: string;
+  thread_id: string | null;
+  message_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -107,6 +129,8 @@ export interface HarnessSession {
 export interface StoredThread extends ThreadSummary {
   /** The harness's own session ID, used to resume the conversation. */
   sessionId: string | null;
+  /** Frozen memory block copied into instructions when the thread started. */
+  memorySnapshot: string | null;
 }
 
 /** One full-text search hit across an agent's past messages. */
@@ -156,6 +180,31 @@ export class Store {
     if (version < 6) this.migrateToV6();
     if (version < 7) this.migrateToV7();
     if (version < 8) this.migrateToV8();
+    if (version < 9) this.migrateToV9();
+  }
+
+  private migrateToV9(): void {
+    this.db.transaction(() => {
+      this.db.run("ALTER TABLE threads ADD COLUMN memory_snapshot TEXT");
+      this.db.run(`
+        CREATE TABLE memories (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          block TEXT NOT NULL,
+          text TEXT NOT NULL,
+          status TEXT NOT NULL,
+          proposed_action TEXT,
+          target_id TEXT,
+          source TEXT NOT NULL,
+          thread_id TEXT,
+          message_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`);
+      this.db.run("CREATE INDEX memories_by_agent ON memories(agent_id, status, block, created_at)");
+      this.db.run("CREATE INDEX memories_by_thread ON memories(thread_id, status, created_at)");
+      this.db.run("PRAGMA user_version = 9");
+    })();
   }
 
   private migrateToV8(): void {
@@ -363,7 +412,9 @@ export class Store {
       source: input.source ?? "chat",
       taskId: input.taskId ?? null,
       settledAt: null,
+      pendingProposals: 0,
       sessionId: null,
+      memorySnapshot: null,
       status: "idle",
       runningSince: null,
       createdAt: now,
@@ -371,8 +422,8 @@ export class Store {
     };
     this.db
       .query(
-        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, task_id, settled_at, session_id, status, running_since, created_at, updated_at)
-         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, $taskId, NULL, NULL, $status, NULL, $createdAt, $updatedAt)`,
+        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, task_id, settled_at, session_id, memory_snapshot, status, running_since, created_at, updated_at)
+         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, $taskId, NULL, NULL, NULL, $status, NULL, $createdAt, $updatedAt)`,
       )
       .run({
         id: thread.id,
@@ -393,15 +444,25 @@ export class Store {
 
   listThreads(): StoredThread[] {
     const rows = this.db
-      .query("SELECT * FROM threads ORDER BY updated_at DESC")
+      .query(
+        `SELECT t.*,
+           (SELECT COUNT(*) FROM memories m WHERE m.thread_id = t.id AND m.status = 'proposed') AS pending_proposals
+         FROM threads t
+         ORDER BY t.updated_at DESC`,
+      )
       .all() as ThreadRow[];
     return rows.map(toThread);
   }
 
   getThread(id: string): StoredThread | null {
-    const row = this.db.query("SELECT * FROM threads WHERE id = $id").get({ id }) as
-      | ThreadRow
-      | null;
+    const row = this.db
+      .query(
+        `SELECT t.*,
+           (SELECT COUNT(*) FROM memories m WHERE m.thread_id = t.id AND m.status = 'proposed') AS pending_proposals
+         FROM threads t
+         WHERE t.id = $id`,
+      )
+      .get({ id }) as ThreadRow | null;
     return row ? toThread(row) : null;
   }
 
@@ -415,6 +476,7 @@ export class Store {
       fast?: boolean;
       settledAt?: number | null;
       sessionId?: string | null;
+      memorySnapshot?: string | null;
       status?: ThreadStatus;
       runningSince?: number | null;
       touch?: boolean;
@@ -431,6 +493,7 @@ export class Store {
       fast: patch.fast ?? current.fast,
       settledAt: patch.settledAt === undefined ? current.settledAt : patch.settledAt,
       sessionId: patch.sessionId === undefined ? current.sessionId : patch.sessionId,
+      memorySnapshot: patch.memorySnapshot === undefined ? current.memorySnapshot : patch.memorySnapshot,
       status: patch.status ?? current.status,
       runningSince: patch.runningSince === undefined ? current.runningSince : patch.runningSince,
       updatedAt: patch.touch ? Date.now() : current.updatedAt,
@@ -438,7 +501,8 @@ export class Store {
     this.db
       .query(
         `UPDATE threads SET title = $title, harness = $harness, model = $model, effort = $effort, fast = $fast,
-           settled_at = $settledAt, session_id = $sessionId, status = $status, running_since = $runningSince, updated_at = $updatedAt WHERE id = $id`,
+           settled_at = $settledAt, session_id = $sessionId, memory_snapshot = $memorySnapshot,
+           status = $status, running_since = $runningSince, updated_at = $updatedAt WHERE id = $id`,
       )
       .run({
         id,
@@ -449,6 +513,7 @@ export class Store {
         fast: next.fast ? 1 : 0,
         settledAt: next.settledAt,
         sessionId: next.sessionId,
+        memorySnapshot: next.memorySnapshot,
         status: next.status,
         runningSince: next.runningSince,
         updatedAt: next.updatedAt,
@@ -481,6 +546,9 @@ export class Store {
   deleteThread(id: string): boolean {
     this.db
       .query("UPDATE scheduled_tasks SET last_run_thread_id = NULL WHERE last_run_thread_id = $id")
+      .run({ id });
+    this.db
+      .query("DELETE FROM memories WHERE thread_id = $id AND status = 'proposed'")
       .run({ id });
     return this.db.query("DELETE FROM threads WHERE id = $id").run({ id }).changes > 0;
   }
@@ -874,6 +942,134 @@ export class Store {
     return this.db.query("DELETE FROM scheduled_tasks WHERE agent_id = $agentId").run({ agentId }).changes;
   }
 
+  createMemory(input: {
+    agentId: string;
+    block: MemoryBlock;
+    text: string;
+    status: MemoryStatus;
+    proposedAction?: MemoryProposalAction | null;
+    targetId?: string | null;
+    source: MemorySource;
+  }): MemoryEntry {
+    const now = Date.now();
+    const id = crypto.randomUUID();
+    const threadId = input.source.kind === "thread" || input.source.kind === "schedule" ? input.source.threadId : null;
+    const messageId =
+      input.source.kind === "thread" || input.source.kind === "schedule"
+        ? (input.source.messageId ?? null)
+        : null;
+    this.db
+      .query(
+        `INSERT INTO memories (
+           id, agent_id, block, text, status, proposed_action, target_id, source, thread_id, message_id, created_at, updated_at
+         ) VALUES (
+           $id, $agentId, $block, $text, $status, $proposedAction, $targetId, $source, $threadId, $messageId, $createdAt, $updatedAt
+         )`,
+      )
+      .run({
+        id,
+        agentId: input.agentId,
+        block: input.block,
+        text: input.text,
+        status: input.status,
+        proposedAction: input.proposedAction ?? null,
+        targetId: input.targetId ?? null,
+        source: JSON.stringify(input.source),
+        threadId,
+        messageId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    return {
+      id,
+      agentId: input.agentId,
+      block: input.block,
+      text: input.text,
+      status: input.status,
+      ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
+      ...(input.targetId ? { targetId: input.targetId } : {}),
+      source: input.source,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  getMemory(id: string): MemoryEntry | null {
+    const row = this.db.query("SELECT * FROM memories WHERE id = $id").get({ id }) as MemoryRow | null;
+    return row ? toMemory(row) : null;
+  }
+
+  listMemories(agentId: string, status?: MemoryStatus): MemoryEntry[] {
+    const rows = status
+      ? (this.db
+          .query("SELECT * FROM memories WHERE agent_id = $agentId AND status = $status ORDER BY created_at, rowid")
+          .all({ agentId, status }) as MemoryRow[])
+      : (this.db
+          .query("SELECT * FROM memories WHERE agent_id = $agentId ORDER BY created_at, rowid")
+          .all({ agentId }) as MemoryRow[]);
+    return rows.map(toMemory);
+  }
+
+  listThreadProposals(threadId: string): MemoryEntry[] {
+    const rows = this.db
+      .query("SELECT * FROM memories WHERE thread_id = $threadId AND status = 'proposed' ORDER BY created_at, rowid")
+      .all({ threadId }) as MemoryRow[];
+    return rows.map(toMemory);
+  }
+
+  updateMemory(
+    id: string,
+    patch: {
+      block?: MemoryBlock;
+      text?: string;
+      status?: MemoryStatus;
+      proposedAction?: MemoryProposalAction | null;
+      targetId?: string | null;
+    },
+  ): MemoryEntry | null {
+    const current = this.getMemory(id);
+    if (!current) return null;
+    const nextBlock = patch.block ?? current.block;
+    const nextText = patch.text ?? current.text;
+    const nextStatus = patch.status ?? current.status;
+    const nextAction =
+      patch.proposedAction === undefined ? (current.proposedAction ?? null) : patch.proposedAction;
+    const nextTargetId = patch.targetId === undefined ? (current.targetId ?? null) : patch.targetId;
+    const updatedAt = Date.now();
+    this.db
+      .query(
+        `UPDATE memories SET block = $block, text = $text, status = $status,
+           proposed_action = $proposedAction, target_id = $targetId, updated_at = $updatedAt
+         WHERE id = $id`,
+      )
+      .run({
+        id,
+        block: nextBlock,
+        text: nextText,
+        status: nextStatus,
+        proposedAction: nextAction,
+        targetId: nextTargetId,
+        updatedAt,
+      });
+    return {
+      ...current,
+      block: nextBlock,
+      text: nextText,
+      status: nextStatus,
+      ...(nextAction ? { proposedAction: nextAction } : { proposedAction: undefined }),
+      ...(nextTargetId ? { targetId: nextTargetId } : { targetId: undefined }),
+      updatedAt,
+    };
+  }
+
+  deleteMemory(id: string): boolean {
+    return this.db.query("DELETE FROM memories WHERE id = $id").run({ id }).changes > 0;
+  }
+
+  deleteMemoriesForAgent(agentId: string): number {
+    return this.db.query("DELETE FROM memories WHERE agent_id = $agentId").run({ agentId }).changes;
+  }
+
   getPreferences(personId = DEFAULT_PERSON_ID): UserPreferences {
     const row = this.db
       .query("SELECT data FROM preferences WHERE person_id = $personId")
@@ -924,6 +1120,7 @@ function normalizePreferences(value: unknown): UserPreferences {
 }
 
 function toThread(row: ThreadRow): StoredThread {
+  const pendingProposals = row.pending_proposals ?? 0;
   return {
     id: row.id,
     title: row.title,
@@ -935,9 +1132,33 @@ function toThread(row: ThreadRow): StoredThread {
     source: row.source === "schedule" ? "schedule" : "chat",
     taskId: row.task_id,
     settledAt: row.settled_at,
+    ...(pendingProposals > 0 ? { pendingProposals } : {}),
     sessionId: row.session_id,
+    memorySnapshot: row.memory_snapshot ?? null,
     status: row.status,
     runningSince: row.running_since,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toMemory(row: MemoryRow): MemoryEntry {
+  let source: MemorySource = { kind: "person" };
+  try {
+    const parsed = JSON.parse(row.source) as MemorySource;
+    if (parsed && typeof parsed === "object" && "kind" in parsed) source = parsed;
+  } catch {
+    // Fallback to person source if malformed.
+  }
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    block: row.block === "profile" ? "profile" : "notes",
+    text: row.text,
+    status: row.status === "proposed" ? "proposed" : "active",
+    ...(row.proposed_action ? { proposedAction: row.proposed_action } : {}),
+    ...(row.target_id ? { targetId: row.target_id } : {}),
+    source,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1025,7 +1246,7 @@ function toScheduledTask(row: ScheduledTaskRow): ScheduledTask {
 
 /** The public view of a thread, without harness-internal fields. */
 export function publicThread(thread: StoredThread): ThreadSummary {
-  const { sessionId: _sessionId, ...summary } = thread;
+  const { sessionId: _sessionId, memorySnapshot: _memorySnapshot, ...summary } = thread;
   return summary;
 }
 

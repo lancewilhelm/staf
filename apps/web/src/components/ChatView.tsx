@@ -1,9 +1,18 @@
-import type { Message } from "@staf/protocol";
+import type { MemoryEntry, Message } from "@staf/protocol";
 import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
-import { modelName, sendMessage, settleThread, stopAnswer, useStore, useHarnesses } from "../store.ts";
+import {
+  modelName,
+  sendMessage,
+  settleThread,
+  stopAnswer,
+  useHarnesses,
+  useStore,
+  useThreadProposals,
+} from "../store.ts";
 import { ChatPill } from "./ChatPill.tsx";
 import { Composer } from "./Composer.tsx";
 import { Icon } from "./Icon.tsx";
+import { MemoryProposalCard } from "./MemoryProposals.tsx";
 import { MessageView } from "./MessageView.tsx";
 
 const EMPTY: Message[] = [];
@@ -12,6 +21,7 @@ export function ChatView() {
   const threadId = useStore((s) => s.threadId);
   const thread = useStore((s) => s.threads.find((t) => t.id === s.threadId) ?? null);
   const messages = useStore((s) => (s.threadId ? (s.messages[s.threadId] ?? EMPTY) : EMPTY));
+  const proposals = useThreadProposals(threadId);
   const running = thread?.status === "running" || messages.some((m) => m.status === "streaming");
   const agents = useStore((s) => s.agents);
   const agentId = useStore((s) => s.agentId);
@@ -58,6 +68,22 @@ export function ChatView() {
   }
 
   const showThreadBar = thread !== null && sidebarMode === "inbox";
+  const messageIds = new Set(messages.map((m) => m.id));
+  const proposalsByMessage = new Map<string, MemoryEntry[]>();
+  const trailingProposals: MemoryEntry[] = [];
+  for (const proposal of proposals) {
+    const mid =
+      proposal.source.kind === "schedule" || proposal.source.kind === "thread"
+        ? (proposal.source.messageId ?? null)
+        : null;
+    if (mid && messageIds.has(mid)) {
+      const list = proposalsByMessage.get(mid) ?? [];
+      list.push(proposal);
+      proposalsByMessage.set(mid, list);
+    } else {
+      trailingProposals.push(proposal);
+    }
+  }
 
   return (
     <main className="chat">
@@ -89,9 +115,16 @@ export function ChatView() {
           {messages.map((message, index) => (
             <Fragment key={message.id}>
               <Switch messages={messages} index={index} />
-              <MessageView message={message} />
+              <MessageView message={message} proposals={proposalsByMessage.get(message.id)} />
             </Fragment>
           ))}
+          {trailingProposals.length > 0 && (
+            <div className="thread-proposals">
+              {trailingProposals.map((proposal) => (
+                <MemoryProposalCard key={proposal.id} proposal={proposal} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div className="dock">

@@ -22,6 +22,7 @@ import {
 import type { EventBus } from "./bus.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome } from "./harness/types.ts";
 import { defaultBridgeConfig, type RunTokenStore, type RunTrigger } from "./mcp/tokens.ts";
+import type { MemoryBackend } from "./memory.ts";
 import { publicAttachment, publicThread, type Store, type StoredMessageMeta } from "./store.ts";
 
 export class ChatError extends Error {
@@ -55,6 +56,7 @@ export class ChatService {
     private readonly harnessOverride: string | null = null,
     private readonly runTokens: RunTokenStore | null = null,
     private readonly getServerUrl: (() => string | null) | null = null,
+    private readonly memory: MemoryBackend | null = null,
   ) {}
 
   listThreads(): ThreadSummary[] {
@@ -94,14 +96,15 @@ export class ChatService {
     return summary;
   }
 
-  getThread(id: string): { thread: ThreadSummary; messages: Message[] } {
+  getThread(id: string): { thread: ThreadSummary; messages: Message[]; proposals: ReturnType<MemoryBackend["listThreadProposals"]> } {
     const thread = this.store.getThread(id);
     if (!thread) throw new ChatError(404, "That conversation does not exist.");
     const messages = this.store.listMessages(id).map((message) => {
       const live = this.live.get(message.id);
       return live ? { ...message, text: live.text, activities: [...live.activities] } : message;
     });
-    return { thread: publicThread(thread), messages };
+    const proposals = this.memory ? this.memory.listThreadProposals(id) : [];
+    return { thread: publicThread(thread), messages, proposals };
   }
 
   /**
@@ -277,6 +280,7 @@ export class ChatService {
     const bound = this.store.bindAttachments(attachmentIds, userMessage.id);
     if (bound.length > 0) userMessage.attachments = bound.map(publicAttachment);
 
+    const trigger = options.trigger ?? "chat";
     let promptText = text;
     if (bound.length > 0) {
       const workspacePaths = bound.map((item) => {
@@ -291,6 +295,25 @@ export class ChatService {
       });
       const note = `[Staf: the person attached ${bound.length === 1 ? "this file" : "these files"}, saved in your workspace: ${workspacePaths.join(", ")}]`;
       promptText = promptText ? `${note}\n\n${promptText}` : note;
+    }
+
+    // Periodic memory reminder every N person messages in a chat thread.
+    const userMessageCount = earlier.filter((m) => m.role === "user").length + 1;
+    if (
+      trigger === "chat" &&
+      this.memory &&
+      agent.memory.nudgeInterval > 0 &&
+      userMessageCount % agent.memory.nudgeInterval === 0
+    ) {
+      promptText +=
+        "\n\n[Staf memory reminder: if the person shared durable preferences, facts, routines, or decisions worth keeping for future conversations, consider saving or updating them with the memory tool.]";
+    }
+
+    // Freeze the agent's memory block on the first turn so instructions stay stable during the thread.
+    let memorySnapshot = thread.memorySnapshot;
+    if (memorySnapshot === null && this.memory) {
+      memorySnapshot = this.memory.renderPromptBlock(agent.id);
+      this.store.updateThread(threadId, { memorySnapshot });
     }
 
     // A thread without a session but with earlier messages has moved to another harness.
@@ -323,11 +346,11 @@ export class ChatService {
       harnessId: thread.harness,
       cwd: agent.workspace,
       access: agent.access,
-      instructions: chatInstructions(agent),
+      instructions: chatInstructions(agent, new Date(), memorySnapshot ?? ""),
       model: thread.model,
       effort: thread.effort,
       fast: thread.fast,
-      trigger: options.trigger ?? "chat",
+      trigger,
       taskId: thread.taskId,
       input,
       ...(withHistory ? { inputWithHistory: withHistory } : {}),

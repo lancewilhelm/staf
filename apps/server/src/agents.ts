@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import {
+  DEFAULT_MEMORY_SETTINGS,
+  MAX_MEMORY_LIMIT,
+  MAX_NUDGE_INTERVAL,
+  MIN_MEMORY_LIMIT,
+  type AgentMemorySettings,
+} from "@staf/protocol";
 
 export const DEFAULT_AGENT_ID = "default";
 
@@ -24,6 +31,8 @@ export interface AgentSettings {
   harnessApps: string[];
   /** Extra folders that the agent may write to, besides its workspace. */
   writableFolders: string[];
+  /** Per-agent memory limits and reminder interval. */
+  memory: AgentMemorySettings;
 }
 
 /** What an agent may reach while it runs. Adapters turn this into harness settings. */
@@ -41,6 +50,7 @@ export interface Agent {
   model: string | null;
   effort: string | null;
   fast: boolean;
+  memory: AgentMemorySettings;
   access: AgentAccess;
   /** The agent's folder, which holds its settings and instructions. The agent cannot write here. */
   dir: string;
@@ -73,6 +83,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   network: true,
   harnessApps: [],
   writableFolders: [],
+  memory: { ...DEFAULT_MEMORY_SETTINGS },
 };
 
 const DEFAULT_INSTRUCTIONS = `# Staf
@@ -96,6 +107,7 @@ export interface AgentEdit {
   effort?: string | null;
   fast?: boolean;
   instructions?: string;
+  memory?: Partial<AgentMemorySettings>;
 }
 
 export class Agents {
@@ -172,6 +184,7 @@ export class Agents {
       model: settings.model,
       effort: settings.effort,
       fast: settings.fast,
+      memory: settings.memory,
       access: {
         network: settings.network,
         harnessApps: settings.harnessApps,
@@ -184,7 +197,7 @@ export class Agents {
   }
 
   /** Creates an agent folder with default access settings, and returns the new agent. */
-  create(input: Required<AgentEdit>): Agent {
+  create(input: Omit<Required<AgentEdit>, "memory"> & { memory?: Partial<AgentMemorySettings> }): Agent {
     const name = checkName(input.name);
     checkInstructions(input.instructions);
     const base = slug(name);
@@ -192,6 +205,7 @@ export class Agents {
     for (let n = 2; existsSync(join(this.root, id)); n++) id = `${base}-${n}`.slice(0, 63);
     const dir = join(this.root, id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const memory = normalizeMemoryEdit(DEFAULT_MEMORY_SETTINGS, input.memory);
     const settings: AgentSettings = {
       ...DEFAULT_SETTINGS,
       name,
@@ -199,6 +213,7 @@ export class Agents {
       model: input.model,
       effort: input.effort,
       fast: input.fast,
+      memory,
     };
     writeFileSync(join(dir, "agent.json"), JSON.stringify(settings, null, 2) + "\n");
     writeFileSync(join(dir, "AGENTS.md"), input.instructions);
@@ -206,8 +221,8 @@ export class Agents {
   }
 
   /**
-   * Changes an agent's name, harness, model, reasoning level, fast mode, or instructions. Other fields in agent.json,
-   * including ones that Staf does not know, are kept as they are.
+   * Changes an agent's name, harness, model, reasoning level, fast mode, instructions, or memory limits.
+   * Other fields in agent.json, including ones that Staf does not know, are kept as they are.
    */
   update(id: string, edit: AgentEdit): Agent {
     const current = this.get(id);
@@ -219,6 +234,9 @@ export class Agents {
     if (edit.model !== undefined) raw.model = edit.model;
     if (edit.effort !== undefined) raw.effort = edit.effort;
     if (edit.fast !== undefined) raw.fast = edit.fast;
+    if (edit.memory !== undefined) {
+      raw.memory = normalizeMemoryEdit(current.memory, edit.memory);
+    }
     parseSettings(id, raw);
     writeFileSync(settingsPath, JSON.stringify(raw, null, 2) + "\n");
     if (edit.instructions !== undefined) {
@@ -320,15 +338,83 @@ function parseSettings(id: string, raw: unknown): AgentSettings {
     network: field("network", isBoolean, "true or false"),
     harnessApps: field("harnessApps", isStringList, "a list of app names or IDs"),
     writableFolders: field("writableFolders", isStringList, "a list of folder paths"),
+    memory: parseMemorySettings(id, value.memory),
   };
 }
 
+function parseMemorySettings(id: string, raw: unknown): AgentMemorySettings {
+  if (raw === undefined) return { ...DEFAULT_MEMORY_SETTINGS };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new AgentConfigError(id, '"memory" must be a JSON object.');
+  }
+  const value = raw as Record<string, unknown>;
+  const checkLimit = (key: "notesLimit" | "profileLimit", fallback: number): number => {
+    const v = value[key];
+    if (v === undefined) return fallback;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < MIN_MEMORY_LIMIT || v > MAX_MEMORY_LIMIT) {
+      throw new AgentConfigError(
+        id,
+        `"memory.${key}" must be an integer between ${MIN_MEMORY_LIMIT} and ${MAX_MEMORY_LIMIT}.`,
+      );
+    }
+    return v;
+  };
+  const nudge = value.nudgeInterval;
+  if (
+    nudge !== undefined &&
+    (typeof nudge !== "number" || !Number.isInteger(nudge) || nudge < 0 || nudge > MAX_NUDGE_INTERVAL)
+  ) {
+    throw new AgentConfigError(
+      id,
+      `"memory.nudgeInterval" must be an integer between 0 and ${MAX_NUDGE_INTERVAL}.`,
+    );
+  }
+  return {
+    notesLimit: checkLimit("notesLimit", DEFAULT_MEMORY_SETTINGS.notesLimit),
+    profileLimit: checkLimit("profileLimit", DEFAULT_MEMORY_SETTINGS.profileLimit),
+    nudgeInterval: nudge === undefined ? DEFAULT_MEMORY_SETTINGS.nudgeInterval : nudge,
+  };
+}
+
+function normalizeMemoryEdit(
+  base: AgentMemorySettings,
+  patch?: Partial<AgentMemorySettings>,
+): AgentMemorySettings {
+  if (!patch) return { ...base };
+  const next: AgentMemorySettings = {
+    notesLimit: patch.notesLimit ?? base.notesLimit,
+    profileLimit: patch.profileLimit ?? base.profileLimit,
+    nudgeInterval: patch.nudgeInterval ?? base.nudgeInterval,
+  };
+  if (
+    !Number.isInteger(next.notesLimit) ||
+    next.notesLimit < MIN_MEMORY_LIMIT ||
+    next.notesLimit > MAX_MEMORY_LIMIT
+  ) {
+    throw new AgentInputError(`Notes limit must be between ${MIN_MEMORY_LIMIT} and ${MAX_MEMORY_LIMIT} characters.`);
+  }
+  if (
+    !Number.isInteger(next.profileLimit) ||
+    next.profileLimit < MIN_MEMORY_LIMIT ||
+    next.profileLimit > MAX_MEMORY_LIMIT
+  ) {
+    throw new AgentInputError(`Profile limit must be between ${MIN_MEMORY_LIMIT} and ${MAX_MEMORY_LIMIT} characters.`);
+  }
+  if (!Number.isInteger(next.nudgeInterval) || next.nudgeInterval < 0 || next.nudgeInterval > MAX_NUDGE_INTERVAL) {
+    throw new AgentInputError(`Reminder interval must be between 0 and ${MAX_NUDGE_INTERVAL} messages.`);
+  }
+  return next;
+}
+
 /**
- * Instructions for one chat run: Staf's own guidance, then the agent's AGENTS.md.
- * Staf passes AGENTS.md itself because it sits outside the workspace, where the agent
- * cannot change it.
+ * Instructions for one chat run: Staf's own guidance, the agent's AGENTS.md, and
+ * the conversation's frozen memory snapshot (when present).
  */
-export function chatInstructions(agent: Pick<Agent, "instructions">, now = new Date()): string {
+export function chatInstructions(
+  agent: Pick<Agent, "instructions">,
+  now = new Date(),
+  memoryBlock = "",
+): string {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const date = now.toLocaleString("en-US", {
     dateStyle: "full",
@@ -339,10 +425,13 @@ export function chatInstructions(agent: Pick<Agent, "instructions">, now = new D
     "You are running inside Staf, a personal assistant for a household. You are not working on a software project unless the person asks for one.",
     "The person reads your answer in a chat app that renders Markdown. Lead with the answer. Keep it short unless they ask for depth. Use links for sources.",
     "When you create a file that the person should view or download (such as a PDF, chart, or report), use Staf's attach_file tool to attach it directly to your reply.",
+    "Use Staf's memory tool to remember durable preferences, routines, people, places (profile) or operational notes (notes) across conversations, and conversation_search to look up earlier chats.",
     "Do not describe your tools or your working folder unless the person asks.",
     `The conversation started on ${date} (${zone}).`,
   ];
   const own = agent.instructions.trim();
   if (own) parts.push(`The agent's own instructions follow.\n\n${own}`);
+  const mem = memoryBlock.trim();
+  if (mem) parts.push(mem);
   return parts.join("\n\n");
 }

@@ -284,6 +284,16 @@ function ThreadRow({
           <span className="thread-title">{thread.title}</span>
           {owner && <span className="thread-agent">{owner}</span>}
         </span>
+        {(thread.pendingProposals ?? 0) > 0 && (
+          <span
+            className="thread-proposal-badge"
+            title={`${thread.pendingProposals} memory proposal${thread.pendingProposals === 1 ? "" : "s"} waiting`}
+            aria-label={`${thread.pendingProposals} memory proposal${thread.pendingProposals === 1 ? "" : "s"} waiting`}
+          >
+            <Icon name="bookmark" size={11} />
+            {thread.pendingProposals}
+          </span>
+        )}
         <span
           className={`thread-time${isRunning ? " working" : ""}`}
           title={isRunning ? "Working for" : "Last activity"}

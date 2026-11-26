@@ -280,6 +280,7 @@ describe("Staf MCP bridge and attach_file end-to-end", () => {
         "update_scheduled_task",
         "delete_scheduled_task",
         "conversation_search",
+        "memory",
       ]);
 
       // Attach a valid workspace PDF to the active assistant message.

@@ -2,13 +2,17 @@
 
 import type {
   AgentInput,
+  AgentMemorySnapshot,
   AgentSummary,
   ApiErrorBody,
+  ApproveMemoryRequest,
   Attachment,
+  CreateMemoryRequest,
   CreateScheduledTaskRequest,
   CreateThreadRequest,
   HealthInfo,
   LoginStart,
+  MemoryEntry,
   ModelInfo,
   RunScheduledTaskResponse,
   ScheduledTask,
@@ -16,6 +20,7 @@ import type {
   StreamEvent,
   ThreadDetail,
   ThreadSummary,
+  UpdateMemoryRequest,
   UpdatePreferencesRequest,
   UpdateScheduledTaskRequest,
   UpdateThreadRequest,
@@ -90,6 +95,30 @@ export class StafClient {
 
   runScheduledTask(id: string): Promise<RunScheduledTaskResponse> {
     return this.request("POST", `/api/tasks/${encodeURIComponent(id)}/run`);
+  }
+
+  getAgentMemory(agentId: string): Promise<AgentMemorySnapshot> {
+    return this.request("GET", `/api/agents/${encodeURIComponent(agentId)}/memories`);
+  }
+
+  createMemory(agentId: string, input: CreateMemoryRequest): Promise<MemoryEntry> {
+    return this.request("POST", `/api/agents/${encodeURIComponent(agentId)}/memories`, input);
+  }
+
+  updateMemory(id: string, input: UpdateMemoryRequest): Promise<MemoryEntry> {
+    return this.request("PATCH", `/api/memories/${encodeURIComponent(id)}`, input);
+  }
+
+  deleteMemory(id: string): Promise<void> {
+    return this.request("DELETE", `/api/memories/${encodeURIComponent(id)}`);
+  }
+
+  approveMemory(id: string, input?: ApproveMemoryRequest): Promise<MemoryEntry | null> {
+    return this.request("POST", `/api/memories/${encodeURIComponent(id)}/approve`, input ?? {});
+  }
+
+  rejectMemory(id: string): Promise<void> {
+    return this.request("POST", `/api/memories/${encodeURIComponent(id)}/reject`);
   }
 
   listModels(harness: string): Promise<ModelInfo[]> {

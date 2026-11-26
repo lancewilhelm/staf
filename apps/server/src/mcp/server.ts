@@ -2,7 +2,9 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, resolve, sep } from "node:path";
 import {
   formatScheduleSummary,
+  isMemoryBlock,
   type CreateScheduledTaskRequest,
+  type MemoryBlock,
   type ScheduledTask,
   type TaskSchedule,
   type UpdateScheduledTaskRequest,
@@ -11,6 +13,7 @@ import type { Agents } from "../agents.ts";
 import { MAX_ATTACHMENT_BYTES } from "../attachments.ts";
 import { ChatError, type ChatService } from "../chat.ts";
 import { VERSION } from "../config.ts";
+import type { MemoryBackend } from "../memory.ts";
 import type { Scheduler } from "../scheduler.ts";
 import type { Store } from "../store.ts";
 import type { RunContext, RunTokenStore } from "./tokens.ts";
@@ -202,6 +205,36 @@ export const STAF_TOOLS: McpToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "memory",
+    description:
+      'Manage this agent\'s saved memory across conversations in two small blocks: "profile" (about the person: preferences, routines, people, places) and "notes" (agent operational notes: how tasks are done, where things live, lessons learned). In scheduled runs, changes are saved as proposals for the person to review.',
+    inputSchema: {
+      type: "object",
+      required: ["action"],
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "add", "replace", "remove"],
+          description: "What to do with saved memory.",
+        },
+        block: {
+          type: "string",
+          enum: ["notes", "profile"],
+          description: 'Which memory block to target (required for add, replace, and remove; optional filter for list).',
+        },
+        text: {
+          type: "string",
+          description: "The concise entry text to save (required for add and replace).",
+        },
+        match: {
+          type: "string",
+          description: "Entry ID or a unique substring of the existing entry to update or remove (required for replace and remove).",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 export interface McpServerDeps {
@@ -210,6 +243,7 @@ export interface McpServerDeps {
   agents: Agents;
   chat: ChatService;
   scheduler: Scheduler;
+  memory: MemoryBackend;
 }
 
 export class McpAuthError extends Error {
@@ -301,6 +335,8 @@ export class McpServer {
           return rpcResult(id, toolSuccess(this.deleteScheduledTask(run, args)));
         case "conversation_search":
           return rpcResult(id, toolSuccess(this.conversationSearch(run, args)));
+        case "memory":
+          return rpcResult(id, toolSuccess(this.handleMemory(run, args)));
         default:
           return rpcError(id, -32602, `Unknown tool: ${name}`);
       }
@@ -454,6 +490,28 @@ export class McpServer {
         snippet: hit.snippet,
       })),
     };
+  }
+
+  private handleMemory(run: RunContext, args: Record<string, unknown>): Record<string, unknown> {
+    const action = args.action;
+    if (action !== "list" && action !== "add" && action !== "replace" && action !== "remove") {
+      throw new ToolInputError('action must be "list", "add", "replace", or "remove".');
+    }
+    let block: MemoryBlock | undefined;
+    if (args.block !== undefined) {
+      if (!isMemoryBlock(args.block)) {
+        throw new ToolInputError('block must be "notes" or "profile".');
+      }
+      block = args.block;
+    }
+    const text = optionalString(args.text, "text");
+    const match = optionalString(args.match, "match");
+    return this.deps.memory.applyToolCall(run, {
+      action,
+      ...(block ? { block } : {}),
+      ...(text !== undefined ? { text } : {}),
+      ...(match !== undefined ? { match } : {}),
+    });
   }
 }
 

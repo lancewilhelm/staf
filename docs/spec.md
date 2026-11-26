@@ -286,17 +286,19 @@ Each slice is used live before the next one starts.
        [decisions.md](decisions.md)), and fast mode stays off unless turned on explicitly.
      - **First live scheduled task:** Port the `morning-intel` skill from Hermes into a
        local agent workspace and run it live.
-3. **The Staf MCP server and memory v1.**
+3. **The Staf MCP server and memory v1.** Done.
    - 3a: run tokens, local `/api/mcp` server, `staf mcp-bridge`, adapter wiring across
      Codex, Claude (using `--setting-sources ""` + `--strict-mcp-config` because
      `--safe-mode` ignores `--mcp-config`), and ACP, plus the first Staf tools
      (`attach_file` for workspace-to-reply attachment delivery, agent-scoped scheduled
      task tools `list_scheduled_tasks`, `create_scheduled_task`, `update_scheduled_task`,
      and `delete_scheduled_task`, and SQLite FTS5 `conversation_search`). Done.
-   - 3b (Planned): per-agent memory v1 as designed in [memory.md](memory.md), with
-     `notes` and `profile` blocks, character limits, prompt-injection scanning, the
-     `memory` tool, reminders, proposal cards in threads and the Inbox, the **Memory**
-     tab in each agent's panel, and `staf memory` CLI.
+   - 3b: per-agent memory v1 as designed in [memory.md](memory.md), with `notes` and
+     `profile` blocks in `staf.db`, per-agent character limits and reminder intervals
+     (`nudgeInterval`), prompt-injection scanning at both write time and prompt rendering,
+     frozen per-thread memory snapshots, the `memory` MCP tool (forcing scheduled runs to
+     propose changes), inline proposal review cards in threads and the Inbox, the
+     **Memory** tab in each agent's panel, and the `staf memory` CLI. Done.
 4. **Gmail.** Setup, a trigger for new mail, inbox monitoring, the personal feed that
    `morning-intel` reads, and inline approval cards for sending mail in threads and the
    Inbox.

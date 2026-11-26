@@ -1,12 +1,19 @@
-import type { Message } from "@staf/protocol";
+import type { MemoryEntry, Message } from "@staf/protocol";
 import { memo, useEffect, useMemo, useState } from "react";
 import { renderMarkdown } from "../markdown.ts";
 import { formatElapsedVerbose } from "../sidebar.ts";
 import { Activities } from "./Activities.tsx";
 import { Attachments } from "./Attachments.tsx";
 import { Icon } from "./Icon.tsx";
+import { MemoryProposalCard } from "./MemoryProposals.tsx";
 
-export const MessageView = memo(function MessageView({ message }: { message: Message }) {
+export const MessageView = memo(function MessageView({
+  message,
+  proposals,
+}: {
+  message: Message;
+  proposals?: MemoryEntry[];
+}) {
   if (message.role === "user") {
     return (
       <div className="message user">
@@ -17,7 +24,7 @@ export const MessageView = memo(function MessageView({ message }: { message: Mes
       </div>
     );
   }
-  return <AssistantMessage message={message} />;
+  return <AssistantMessage message={message} proposals={proposals} />;
 });
 
 function useStreamingElapsed(active: boolean, startedAt: number): number | undefined {
@@ -31,7 +38,7 @@ function useStreamingElapsed(active: boolean, startedAt: number): number | undef
   return active ? Math.max(0, now - startedAt) : undefined;
 }
 
-function AssistantMessage({ message }: { message: Message }) {
+function AssistantMessage({ message, proposals }: { message: Message; proposals?: MemoryEntry[] }) {
   const streaming = message.status === "streaming";
   const html = useMemo(() => renderMarkdown(message.text), [message.text]);
   const thinking = streaming && !message.text && !message.activities.some((a) => a.status === "running");
@@ -62,6 +69,13 @@ function AssistantMessage({ message }: { message: Message }) {
         <div className={`prose${streaming ? " streaming" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />
       )}
       {message.attachments.length > 0 && <Attachments attachments={message.attachments} />}
+      {proposals && proposals.length > 0 && (
+        <div className="message-proposals">
+          {proposals.map((proposal) => (
+            <MemoryProposalCard key={proposal.id} proposal={proposal} />
+          ))}
+        </div>
+      )}
       {message.status === "failed" && (
         <div className="notice error">
           <Icon name="alert" size={16} />

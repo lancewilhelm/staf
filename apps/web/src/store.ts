@@ -2,9 +2,14 @@ import {
   DEFAULT_PREFERENCES,
   type Activity,
   type AgentInput,
+  type AgentMemorySettings,
+  type AgentMemorySnapshot,
   type AgentSummary,
+  type ApproveMemoryRequest,
   type CreateScheduledTaskRequest,
   type HealthInfo,
+  type MemoryBlock,
+  type MemoryEntry,
   type Message,
   type ModelInfo,
   type ScheduledTask,
@@ -32,6 +37,8 @@ export interface State {
   threads: ThreadSummary[];
   /** Messages for each thread that has been opened. */
   messages: Record<string, Message[]>;
+  /** Pending memory proposals for each thread that has been opened. */
+  proposals: Record<string, MemoryEntry[]>;
   health: HealthInfo | null;
   agents: AgentSummary[];
   /** The agent that a new chat goes to. */
@@ -46,6 +53,8 @@ export interface State {
   models: Record<string, ModelList>;
   /** Scheduled tasks loaded per agent ID. */
   tasks: Record<string, ScheduledTask[]>;
+  /** Memory snapshots loaded per agent ID. */
+  memories: Record<string, AgentMemorySnapshot>;
   preferences: UserPreferences;
   settings: SettingsView | null;
   agentPanel: AgentPanelView | null;
@@ -68,7 +77,7 @@ export type SettingsView =
   | { section: "providers" }
   | { section: "appearance" };
 
-export type AgentPanelSection = "profile" | "tasks";
+export type AgentPanelSection = "profile" | "tasks" | "memory";
 
 export type AgentPanelView =
   | { mode: "create" }
@@ -117,12 +126,14 @@ let state: State = {
   threadId: threadFromPath(location.pathname),
   threads: [],
   messages: {},
+  proposals: {},
   health: null,
   agents: [],
   agentId: readSavedAgent(),
   draft: lastChoice(readSavedAgent()),
   models: {},
   tasks: {},
+  memories: {},
   preferences: {
     ...DEFAULT_PREFERENCES,
     theme: initialPreferences.theme,
@@ -143,6 +154,7 @@ function set(patch: Partial<State> | ((current: State) => Partial<State>)): void
 
 const NO_HARNESSES: HealthInfo["harnesses"] = [];
 const NO_TASKS: ScheduledTask[] = [];
+const NO_PROPOSALS: MemoryEntry[] = [];
 
 /** The harnesses from the last health check. The fallback is one shared array, because a
  *  new array on every read makes useSyncExternalStore render forever. */
@@ -153,6 +165,14 @@ export function useHarnesses(): HealthInfo["harnesses"] {
 /** Scheduled tasks for one agent, using a shared empty array fallback to keep selector identity stable. */
 export function useAgentTasks(agentId: string): ScheduledTask[] {
   return useStore((s) => s.tasks[agentId] ?? NO_TASKS);
+}
+
+export function useAgentMemory(agentId: string): AgentMemorySnapshot | null {
+  return useStore((s) => s.memories[agentId] ?? null);
+}
+
+export function useThreadProposals(threadId: string | null): MemoryEntry[] {
+  return useStore((s) => (threadId ? (s.proposals[threadId] ?? NO_PROPOSALS) : NO_PROPOSALS));
 }
 
 export function useStore<T>(select: (state: State) => T): T {
@@ -231,7 +251,10 @@ async function loadThreads(): Promise<void> {
 async function loadThread(id: string): Promise<void> {
   try {
     const detail = await api.getThread(id);
-    set((current) => ({ messages: { ...current.messages, [id]: detail.messages } }));
+    set((current) => ({
+      messages: { ...current.messages, [id]: detail.messages },
+      proposals: { ...current.proposals, [id]: detail.proposals ?? [] },
+    }));
   } catch (error) {
     report(error);
   }
@@ -447,6 +470,91 @@ export async function runScheduledTaskNow(task: ScheduledTask): Promise<ThreadSu
   }
 }
 
+export async function loadAgentMemory(agentId: string): Promise<void> {
+  try {
+    const snapshot = await api.getAgentMemory(agentId);
+    set((current) => ({ memories: { ...current.memories, [agentId]: snapshot } }));
+  } catch (error) {
+    report(error);
+  }
+}
+
+export async function addMemory(agentId: string, block: MemoryBlock, text: string): Promise<boolean> {
+  try {
+    await api.createMemory(agentId, { block, text });
+    await loadAgentMemory(agentId);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function editMemory(entry: MemoryEntry, text: string, block?: MemoryBlock): Promise<boolean> {
+  try {
+    await api.updateMemory(entry.id, { text, ...(block ? { block } : {}) });
+    await loadAgentMemory(entry.agentId);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function removeMemory(entry: MemoryEntry): Promise<boolean> {
+  try {
+    await api.deleteMemory(entry.id);
+    await loadAgentMemory(entry.agentId);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function approveMemoryProposal(
+  entry: MemoryEntry,
+  edit?: ApproveMemoryRequest,
+): Promise<boolean> {
+  try {
+    await api.approveMemory(entry.id, edit);
+    if (entry.agentId in state.memories) await loadAgentMemory(entry.agentId);
+    const tid = entry.source.kind === "schedule" || entry.source.kind === "thread" ? entry.source.threadId : null;
+    if (tid && (tid === state.threadId || tid in state.proposals)) await loadThread(tid);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function rejectMemoryProposal(entry: MemoryEntry): Promise<boolean> {
+  try {
+    await api.rejectMemory(entry.id);
+    if (entry.agentId in state.memories) await loadAgentMemory(entry.agentId);
+    const tid = entry.source.kind === "schedule" || entry.source.kind === "thread" ? entry.source.threadId : null;
+    if (tid && (tid === state.threadId || tid in state.proposals)) await loadThread(tid);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function saveAgentMemorySettings(
+  agentId: string,
+  memory: Partial<AgentMemorySettings>,
+): Promise<boolean> {
+  try {
+    await api.updateAgent(agentId, { memory });
+    await Promise.all([loadAgents(), loadAgentMemory(agentId)]);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
 export async function signIn(harness: string): Promise<void> {
   try {
     const { url } = await api.startLogin(harness);
@@ -578,9 +686,11 @@ function apply(event: StreamEvent): void {
     case "thread.deleted":
       set((current) => {
         const { [event.threadId]: _removed, ...messages } = current.messages;
+        const { [event.threadId]: _removedProposals, ...proposals } = current.proposals;
         return {
           threads: current.threads.filter((thread) => thread.id !== event.threadId),
           messages,
+          proposals,
         };
       });
       if (state.threadId === event.threadId) openThread(null, { replace: true });
@@ -649,6 +759,17 @@ function apply(event: StreamEvent): void {
         (state.agentPanel?.mode === "edit" && state.agentPanel.agentId === event.agentId)
       ) {
         void loadAgentTasks(event.agentId);
+      }
+      return;
+    case "memories.changed":
+      if (
+        event.agentId in state.memories ||
+        (state.agentPanel?.mode === "edit" && state.agentPanel.agentId === event.agentId)
+      ) {
+        void loadAgentMemory(event.agentId);
+      }
+      if (event.threadId && (event.threadId === state.threadId || event.threadId in state.proposals)) {
+        void loadThread(event.threadId);
       }
       return;
     case "message.completed":

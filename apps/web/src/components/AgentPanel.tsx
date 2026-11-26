@@ -17,12 +17,14 @@ import {
   useStore,
 } from "../store.ts";
 import { Icon, type IconName } from "./Icon.tsx";
+import { MemoryPane } from "./MemoryPane.tsx";
 import { ModelPickerPanel, type ModelPickerValue } from "./ModelPicker.tsx";
 import { ScheduledTasksPane } from "./ScheduledTasksPane.tsx";
 
 const SECTIONS: Array<{ id: AgentPanelSection; label: string; icon: IconName }> = [
   { id: "profile", label: "Profile", icon: "user" },
   { id: "tasks", label: "Scheduled tasks", icon: "clock" },
+  { id: "memory", label: "Memory", icon: "bookmark" },
 ];
 
 /** Dedicated slide-over panel for creating, editing, and managing one agent. */
@@ -130,6 +132,10 @@ export function AgentPanel({ view }: { view: AgentPanelView }) {
 
         {view.mode === "edit" && view.section === "tasks" && agent && (
           <ScheduledTasksPane key={agent.id} agent={agent} />
+        )}
+
+        {view.mode === "edit" && view.section === "memory" && agent && (
+          <MemoryPane key={agent.id} agent={agent} />
         )}
       </div>
     </div>

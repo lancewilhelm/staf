@@ -32,6 +32,7 @@ const paths = {
   external: "M14 5h5v5M10 14L19 5M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5",
   play: "M8 5.5v13l11-6.5z",
   back: "M15 6l-6 6 6 6",
+  bookmark: "M6 4h12v17l-6-4-6 4z",
 } as const;
 
 export type IconName = keyof typeof paths;

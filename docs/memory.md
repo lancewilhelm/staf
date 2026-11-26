@@ -1,10 +1,12 @@
-# Memory (Planned)
+# Memory
 
-This is the design for how a Staf agent remembers things across conversations. Nothing
-here is built yet. Memory v1 is planned for slice 3, together with the Staf MCP server.
+This describes how a Staf agent remembers things across conversations. Memory v1 is built
+in slice 3 together with the Staf MCP server, and sits behind a small `MemoryBackend`
+interface so that a larger memory system (such as one modeled on Hindsight) can replace it
+later.
 
 Memory v1 copies the built-in memory of Hermes, which has worked well in daily use.
-Larger systems, such as one modeled on Hindsight, are planned for later (see the end).
+Larger systems are planned for later (see the end).
 
 ## Goals
 

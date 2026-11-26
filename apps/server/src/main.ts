@@ -2,7 +2,7 @@
 import { mkdirSync } from "node:fs";
 import web from "../../web/index.html";
 import { createApp } from "./app.ts";
-import { apps, ask, chat, CliError, login, status, threads } from "./cli/commands.ts";
+import { apps, ask, chat, CliError, login, memory, status, threads } from "./cli/commands.ts";
 import { DEFAULT_HOST, resolvePaths, resolvePort, VERSION } from "./config.ts";
 import { runMcpBridge } from "./mcp/bridge.ts";
 
@@ -19,6 +19,7 @@ Usage:
                              --thread <id>    continue a conversation
   staf chat [thread-id]      Chat in the terminal (takes the same options, except --thread)
   staf threads               List conversations
+  staf memory [list|add|...] View and edit an agent's saved memory and proposals
   staf status                Show whether the host and harnesses are ready
   staf login codex           Sign Staf in to ChatGPT through Codex
   staf apps [--all]          List the ChatGPT apps that agents can be given
@@ -68,6 +69,8 @@ async function main(argv: string[]): Promise<number> {
       return chat(args);
     case "threads":
       return threads();
+    case "memory":
+      return memory(args);
     case "status":
       return status();
     case "login":

@@ -24,6 +24,8 @@ export interface ThreadSummary {
   taskId: string | null;
   /** Unix time in milliseconds when this thread was settled, or null while active. */
   settledAt: number | null;
+  /** Number of pending memory proposals attached to this thread. */
+  pendingProposals?: number;
   status: ThreadStatus;
   /** Unix time in milliseconds when the current active turn started, or null while idle. */
   runningSince: number | null;
@@ -129,6 +131,76 @@ export interface Message {
 export interface ThreadDetail {
   thread: ThreadSummary;
   messages: Message[];
+  /** Pending memory proposals created in this thread, waiting for a person's review. */
+  proposals?: MemoryEntry[];
+}
+
+export type MemoryBlock = "notes" | "profile";
+export type MemoryStatus = "active" | "proposed";
+export type MemoryProposalAction = "add" | "replace" | "remove";
+
+export type MemorySource =
+  | { kind: "person" }
+  | { kind: "thread"; threadId: string; messageId?: string }
+  | { kind: "schedule"; threadId: string; messageId?: string; taskId?: string | null };
+
+/** Per-agent limits and reminder cadence for memory v1. */
+export interface AgentMemorySettings {
+  /** Maximum total characters in the Notes block (default 2200). */
+  notesLimit: number;
+  /** Maximum total characters in the Profile block (default 1375). */
+  profileLimit: number;
+  /** Remind the agent to consider saving memory every N person messages (0 disables). */
+  nudgeInterval: number;
+}
+
+export interface MemoryEntry {
+  id: string;
+  agentId: string;
+  block: MemoryBlock;
+  text: string;
+  status: MemoryStatus;
+  proposedAction?: MemoryProposalAction;
+  targetId?: string | null;
+  /** Current text of the targeted active memory for replace/remove proposals. */
+  targetText?: string | null;
+  source: MemorySource;
+  /** Present when prompt-injection scanning withheld this entry from model instructions. */
+  flaggedReason?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MemoryBlockUsage {
+  used: number;
+  limit: number;
+  count: number;
+}
+
+export interface AgentMemorySnapshot {
+  agentId: string;
+  settings: AgentMemorySettings;
+  usage: {
+    notes: MemoryBlockUsage;
+    profile: MemoryBlockUsage;
+  };
+  active: MemoryEntry[];
+  proposed: MemoryEntry[];
+}
+
+export interface CreateMemoryRequest {
+  block: MemoryBlock;
+  text: string;
+}
+
+export interface UpdateMemoryRequest {
+  block?: MemoryBlock;
+  text?: string;
+}
+
+export interface ApproveMemoryRequest {
+  block?: MemoryBlock;
+  text?: string;
 }
 
 export interface AgentSummary {
@@ -146,6 +218,8 @@ export interface AgentSummary {
   fast: boolean;
   /** The contents of AGENTS.md. */
   instructions: string;
+  /** Memory block limits and reminder interval for this agent. */
+  memory: AgentMemorySettings;
   /** Access settings. They are edited in agent.json, not through the API. */
   network: boolean;
   writableFolders: string[];
@@ -162,6 +236,7 @@ export interface AgentInput {
   effort: string | null;
   fast: boolean;
   instructions: string;
+  memory?: Partial<AgentMemorySettings>;
 }
 
 export interface HarnessInfo {
@@ -340,7 +415,9 @@ export type StreamEvent =
   /** A person's preferences changed. */
   | { type: "preferences.changed"; preferences: UserPreferences }
   /** Scheduled tasks for an agent were added, changed, removed, or ran. */
-  | { type: "tasks.changed"; agentId: string };
+  | { type: "tasks.changed"; agentId: string }
+  /** Active memories or memory proposals changed for an agent. */
+  | { type: "memories.changed"; agentId: string; threadId?: string | null };
 
 export interface ApiErrorBody {
   error: string;

@@ -1,12 +1,17 @@
 import {
   isHeroFont,
+  isMemoryBlock,
   isSidebarMode,
   isThemePreference,
+  type AgentMemorySettings,
   type AgentSummary,
+  type ApproveMemoryRequest,
+  type CreateMemoryRequest,
   type CreateScheduledTaskRequest,
   type HealthInfo,
   type StreamEvent,
   type ThreadSource,
+  type UpdateMemoryRequest,
   type UpdatePreferencesRequest,
   type UpdateScheduledTaskRequest,
   type UpdateThreadRequest,
@@ -28,6 +33,7 @@ import { VERSION } from "./config.ts";
 import { CodexAdapter } from "./harness/codex/adapter.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
 import { McpAuthError, type McpServer } from "./mcp/server.ts";
+import type { MemoryBackend } from "./memory.ts";
 import type { Scheduler } from "./scheduler.ts";
 import type { Store } from "./store.ts";
 
@@ -37,6 +43,7 @@ export interface HttpOptions {
   store: Store;
   chat: ChatService;
   scheduler: Scheduler;
+  memory: MemoryBackend;
   agents: Agents;
   bus: EventBus;
   harnesses: Map<string, HarnessAdapter>;
@@ -103,6 +110,7 @@ export function startHttp(options: HttpOptions): Server<undefined> {
           effort: edit.effort ?? null,
           fast: edit.fast ?? false,
           instructions: edit.instructions ?? "",
+          ...(edit.memory ? { memory: edit.memory } : {}),
         });
         bus.publish({ type: "agents.changed" });
         return json(summary(agent), 201);
@@ -125,8 +133,38 @@ export function startHttp(options: HttpOptions): Server<undefined> {
         if (!options.agents.get(id)) throw new AgentNotFoundError(id);
         await chat.deleteThreadsOf(id);
         options.scheduler.deleteTasksForAgent(id);
+        options.memory.deleteForAgent(id);
         options.agents.remove(id);
         bus.publish({ type: "agents.changed" });
+        return new Response(null, { status: 204 });
+      }),
+    },
+    "/api/agents/:id/memories": {
+      GET: api((req) => json(options.memory.getSnapshot(req.params.id!))),
+      POST: api(async (req) => {
+        const input = readCreateMemory(await readJson(req));
+        return json(options.memory.createActive(req.params.id!, input), 201);
+      }),
+    },
+    "/api/memories/:id": {
+      PATCH: api(async (req) => {
+        const input = readUpdateMemory(await readJson(req));
+        return json(options.memory.updateEntry(req.params.id!, input));
+      }),
+      DELETE: api((req) => {
+        options.memory.deleteEntry(req.params.id!);
+        return new Response(null, { status: 204 });
+      }),
+    },
+    "/api/memories/:id/approve": {
+      POST: api(async (req) => {
+        const input = readApproveMemory(await readJson(req));
+        return json(options.memory.approveProposal(req.params.id!, input));
+      }),
+    },
+    "/api/memories/:id/reject": {
+      POST: api((req) => {
+        options.memory.rejectProposal(req.params.id!);
         return new Response(null, { status: 204 });
       }),
     },
@@ -268,6 +306,7 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       effort: agent.effort,
       fast: agent.fast,
       instructions: agent.instructions,
+      memory: agent.memory,
       network: agent.access.network,
       writableFolders: agent.access.writableFolders,
       harnessApps: agent.access.harnessApps,
@@ -295,6 +334,9 @@ export function startHttp(options: HttpOptions): Server<undefined> {
     if (body.instructions !== undefined) {
       if (typeof body.instructions !== "string") throw new ChatError(400, "The instructions must be text.");
       edit.instructions = body.instructions;
+    }
+    if (body.memory !== undefined) {
+      edit.memory = readMemorySettingsPatch(body.memory);
     }
     return edit;
   }
@@ -365,6 +407,50 @@ function eventStream(req: Request, server: Server<undefined>, bus: EventBus): Re
       connection: "keep-alive",
     },
   });
+}
+
+function readCreateMemory(body: Record<string, unknown>): CreateMemoryRequest {
+  if (!isMemoryBlock(body.block)) throw new ChatError(400, 'Choose either "notes" or "profile".');
+  if (typeof body.text !== "string") throw new ChatError(400, "Memory text must be a string.");
+  return { block: body.block, text: body.text };
+}
+
+function readUpdateMemory(body: Record<string, unknown>): UpdateMemoryRequest {
+  const patch: UpdateMemoryRequest = {};
+  if (body.block !== undefined) {
+    if (!isMemoryBlock(body.block)) throw new ChatError(400, 'Block must be "notes" or "profile".');
+    patch.block = body.block;
+  }
+  if (body.text !== undefined) {
+    if (typeof body.text !== "string") throw new ChatError(400, "Memory text must be a string.");
+    patch.text = body.text;
+  }
+  return patch;
+}
+
+function readApproveMemory(body: Record<string, unknown>): ApproveMemoryRequest {
+  return readUpdateMemory(body);
+}
+
+function readMemorySettingsPatch(raw: unknown): Partial<AgentMemorySettings> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ChatError(400, "Memory settings must be an object.");
+  }
+  const value = raw as Record<string, unknown>;
+  const patch: Partial<AgentMemorySettings> = {};
+  if (value.notesLimit !== undefined) {
+    if (typeof value.notesLimit !== "number") throw new ChatError(400, "notesLimit must be a number.");
+    patch.notesLimit = value.notesLimit;
+  }
+  if (value.profileLimit !== undefined) {
+    if (typeof value.profileLimit !== "number") throw new ChatError(400, "profileLimit must be a number.");
+    patch.profileLimit = value.profileLimit;
+  }
+  if (value.nudgeInterval !== undefined) {
+    if (typeof value.nudgeInterval !== "number") throw new ChatError(400, "nudgeInterval must be a number.");
+    patch.nudgeInterval = value.nudgeInterval;
+  }
+  return patch;
 }
 
 function readCreateTask(body: Record<string, unknown>): CreateScheduledTaskRequest {

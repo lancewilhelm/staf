@@ -12,6 +12,7 @@ import type { HarnessAdapter } from "./harness/types.ts";
 import { startHttp } from "./http.ts";
 import { McpServer } from "./mcp/server.ts";
 import { RunTokenStore } from "./mcp/tokens.ts";
+import { MemoryService } from "./memory.ts";
 import { Scheduler } from "./scheduler.ts";
 import { Store } from "./store.ts";
 
@@ -31,6 +32,7 @@ export interface App {
   url: URL;
   chat: ChatService;
   scheduler: Scheduler;
+  memory: MemoryService;
   store: Store;
   runTokens: RunTokenStore;
   stop(): Promise<void>;
@@ -62,6 +64,7 @@ export function createApp(options: AppOptions): App {
     ];
   const harnesses = new Map(list.map((harness) => [harness.id, harness]));
   const runTokens = new RunTokenStore();
+  const memory = new MemoryService(store, agents, bus);
   let serverUrl: string | null = null;
   const chat = new ChatService(
     store,
@@ -72,9 +75,10 @@ export function createApp(options: AppOptions): App {
     options.harnessOverride ?? null,
     runTokens,
     () => serverUrl,
+    memory,
   );
   const scheduler = new Scheduler(store, agents, chat, bus, options.harnessOverride ?? null);
-  const mcp = new McpServer({ tokens: runTokens, store, agents, chat, scheduler });
+  const mcp = new McpServer({ tokens: runTokens, store, agents, chat, scheduler, memory });
   scheduler.start();
 
   const server = startHttp({
@@ -83,6 +87,7 @@ export function createApp(options: AppOptions): App {
     store,
     chat,
     scheduler,
+    memory,
     agents,
     bus,
     harnesses,
@@ -96,6 +101,7 @@ export function createApp(options: AppOptions): App {
     url: server.url,
     chat,
     scheduler,
+    memory,
     store,
     runTokens,
     async stop() {
