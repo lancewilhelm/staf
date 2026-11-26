@@ -74,6 +74,7 @@ export type ThreadItem =
       id: string;
       server: string;
       tool: string;
+      arguments?: unknown;
       status: "inProgress" | "completed" | "failed";
       error: { message: string } | null;
     }

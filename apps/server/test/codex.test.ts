@@ -286,6 +286,7 @@ describe("codexThreadConfig", () => {
         command: "/usr/local/bin/staf",
         args: ["mcp-bridge", "--url", "http://127.0.0.1:4280"],
         env: { STAF_RUN_TOKEN: "tok-codex" },
+        default_tools_approval_mode: "approve",
       },
     });
   });
@@ -312,10 +313,18 @@ describe("activityFromItem", () => {
     expect(tool).toMatchObject({ kind: "tool", title: "Used gmail · search", status: "running" });
 
     const stafTool = activityFromItem(
-      { type: "mcpToolCall", id: "5", server: "staf", tool: "attach_file", status: "completed", error: null },
+      {
+        type: "mcpToolCall",
+        id: "5",
+        server: "staf",
+        tool: "attach_file",
+        arguments: { path: "out/brief.pdf" },
+        status: "completed",
+        error: null,
+      },
       true,
     );
-    expect(stafTool).toMatchObject({ kind: "file", title: "Attached a file", status: "done" });
+    expect(stafTool).toMatchObject({ kind: "file", title: "Attached brief.pdf", status: "done" });
 
     expect(activityFromItem({ type: "userMessage", id: "4" }, true)).toBeNull();
   });

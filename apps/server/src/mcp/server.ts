@@ -39,6 +39,12 @@ interface McpToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
 }
 
 const SCHEDULE_SCHEMA = {
@@ -93,6 +99,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
     name: "attach_file",
     description:
       "Attach a file from your workspace directly to your current reply so the person can preview or download it in Staf (for example, a generated PDF, image, CSV, or report).",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: "object",
       required: ["path"],
@@ -116,6 +123,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
   {
     name: "list_scheduled_tasks",
     description: "List all scheduled tasks that belong to this agent, including their schedules, status, and last run outcome.",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: "object",
       properties: {},
@@ -126,6 +134,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
     name: "create_scheduled_task",
     description:
       "Create a new scheduled task for this agent. Scheduled tasks run on Codex or Claude (never Antigravity) and keep fast mode off by default.",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: "object",
       required: ["name", "prompt", "schedule"],
@@ -149,6 +158,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
   {
     name: "update_scheduled_task",
     description: "Update one of this agent's scheduled tasks, such as changing its schedule, prompt, or pausing and resuming it.",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: "object",
       required: ["taskId"],
@@ -173,6 +183,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
   {
     name: "delete_scheduled_task",
     description: "Delete one of this agent's scheduled tasks by ID.",
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     inputSchema: {
       type: "object",
       required: ["taskId"],
@@ -186,6 +197,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
     name: "conversation_search",
     description:
       "Search this agent's past conversations using full-text search to recall earlier discussions, facts, or decisions.",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: "object",
       required: ["query"],
@@ -209,6 +221,7 @@ export const STAF_TOOLS: McpToolDefinition[] = [
     name: "memory",
     description:
       'Manage this agent\'s saved memory across conversations in two small blocks: "profile" (about the person: preferences, routines, people, places) and "notes" (agent operational notes: how tasks are done, where things live, lessons learned). In scheduled runs, changes are saved as proposals for the person to review.',
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: "object",
       required: ["action"],

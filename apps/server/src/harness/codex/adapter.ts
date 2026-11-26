@@ -570,6 +570,8 @@ export function codexThreadConfig(
         command: mcp.command,
         args: mcp.args,
         env: mcp.env,
+        // Approvals for Staf tools are enforced inside Staf's MCP server, not by Codex.
+        default_tools_approval_mode: "approve",
       },
     };
   }
@@ -613,7 +615,11 @@ export function activityFromItem(item: ThreadItem, completed: boolean): Activity
     }
     case "mcpToolCall": {
       const call = item as Extract<ThreadItem, { type: "mcpToolCall" }>;
-      const stafStep = call.server === "staf" ? describeStafTool(call.tool) : null;
+      const args =
+        typeof call.arguments === "object" && call.arguments !== null && !Array.isArray(call.arguments)
+          ? (call.arguments as Record<string, unknown>)
+          : {};
+      const stafStep = call.server === "staf" ? describeStafTool(call.tool, args) : null;
       const activity: Activity = {
         ...base,
         kind: stafStep?.kind ?? "tool",
