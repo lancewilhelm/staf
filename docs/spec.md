@@ -33,11 +33,11 @@ lack: household integrations, schedules, an inbox, approvals, and a simple inter
 
 | Concept | Meaning |
 |---|---|
-| **Person** | A member of the household. Each person owns their own threads, agents, jobs, and inbox. |
-| **Agent** | A folder with settings (`agent.json`), instructions (`AGENTS.md`), and a `workspace/` that the agent works in. Settings choose its default harness and model, network access, harness apps, and extra writable folders. Each agent has its own memory ([memory.md](memory.md)). See [agents.md](agents.md). |
-| **Thread** | A chat conversation with one agent. It starts on the agent's default provider and model, and the person can change them during the conversation. A thread stays on one harness session. |
-| **Job** | A run of an agent that a schedule or a trigger starts, such as "every day at 05:30" or "a new email arrived". |
-| **Inbox item** | Something that needs a person's attention: a job result, an approval request, or an alert. |
+| **Person** | A member of the household. Each person owns their own threads, agents, scheduled tasks, preferences, and integrations. |
+| **Agent** | A folder with settings (`agent.json`), instructions (`AGENTS.md`), and a `workspace/` that the agent works in. Settings choose its default harness and model, network access, harness apps, and extra writable folders. Each agent owns its own scheduled tasks and memory ([memory.md](memory.md)). See [agents.md](agents.md). |
+| **Thread** | One conversation or scheduled task run with an agent. It starts on the agent's default provider and model, and the person can change them during the thread. A thread can hold message attachments (such as a PDF) and can be settled once handled. |
+| **Scheduled task** | A recurring or triggered run attached to one agent, such as "every day at 05:30" or "a new email arrived". Each run creates a thread marked with a schedule icon. |
+| **Inbox** | The queue of unsettled threads, scheduled task runs, and pending approvals or proposals that need a person's attention, cleared as items are settled. |
 | **Plugin** | An integration, such as Gmail. A plugin adds MCP tools, triggers, and a setup flow. |
 | **Harness** | An external agent runtime that Staf drives through an adapter. |
 
@@ -45,14 +45,15 @@ lack: household integrations, schedules, an inbox, approvals, and a simple inter
 
 ```
             ┌──────────── Web app (React PWA) ─────────────┐
-            │  Chat   ·   Inbox   ·   Agents               │
+            │  Sidebar (Agents · Threads/Inbox) · Chat     │
+            │  Agent panel (Profile · Scheduled tasks)     │
             └──────────────────────┬───────────────────────┘
                                    │ HTTP + server-sent events
    staf (one binary, Bun + TypeScript, Mac or Linux, always on)
    ├─ HTTP API and the embedded web app
    ├─ CLI client (`staf ask`, `staf chat`) that talks to the running host
    ├─ Store: SQLite in ~/.staf/staf.db
-   ├─ Threads, jobs, inbox, people
+   ├─ Threads, attachments, scheduled tasks, preferences, people
    ├─ Plugins: MCP tools, triggers, setup flows
    ├─ Staf MCP server, reached through `staf mcp-bridge --token <run token>`
    └─ Runner: one adapter interface
@@ -128,12 +129,22 @@ the same way whichever harness made the call.
 
 ## Interface
 
-- **Chat** works like a search-engine chat. An empty thread shows one large input.
-  Answers stream in as Markdown. A single collapsed line, such as "Searched the web ·
-  4 steps", opens to show the activity.
-- **Inbox** (slice 2) lists job results and approvals. Each item opens to its full
-  result, for example the newspaper PDF.
-- **Agents** (slice 2) lists each person's agents and jobs.
+- **Chat** works like a search-engine chat. A new thread shows the current agent's name
+  above one large input. Answers stream in as Markdown. A single collapsed line, such as
+  "Searched the web · 4 steps", opens to show the activity.
+- **Threads and Inbox** (slice 2): Every chat and every scheduled task run is a thread.
+  Scheduled task runs carry a small schedule icon (such as a clock) so that they stand
+  apart from threads that a person started. In **Settings → Appearance**, each person
+  chooses between **Inbox mode** (active threads and scheduled task runs stay in the
+  sidebar until settled, with settled history tucked away) and **Thread list mode** (a
+  chronological list of manual threads, with scheduled task runs kept in an Inbox
+  section so that automated runs do not clutter manual threads).
+- **Agent panel** (slice 2): Each agent's own settings (profile, instructions, defaults,
+  access summary, and scheduled tasks — and later memory and integrations) open in an
+  agent-specific popup or drawer from the sidebar rather than crowding global Settings.
+- **Synced preferences** (slice 2): Appearance and sidebar preferences (theme, heading
+  font, and Inbox vs. Thread list mode) are stored on the host per person and synced
+  across all devices and sessions.
 - The web app becomes an installable PWA in slice 6, with push notifications. A native
   Expo app can follow later and reuse `packages/protocol`.
 - The CLI covers the same chat: `staf ask "question"` prints one answer, and `staf chat`
@@ -223,22 +234,45 @@ Each slice is used live before the next one starts.
        font from five bundled and system options (Bricolage Grotesque, Space Grotesk,
        System sans, Fraunces Soft, and System serif).
      - On phones, the agents sit in the same slide-out sidebar above the conversations.
-2. **Jobs and the inbox.** Schedules, job runs, inbox items with attachments, and a port of the `morning-intel` skill from Hermes. Jobs run on Codex or
-   Claude; Staf refuses to schedule a job on Antigravity for now (see
-   [decisions.md](decisions.md)).
+2. **Scheduled tasks, unified Inbox, and agent settings.**
+   - **Agent settings panel:** Move agent-specific configuration out of global Settings
+     into an agent popup or drawer opened from the sidebar. Keep global Settings focused
+     on Providers, Appearance, and (later) People.
+   - **Scheduled tasks:** Define, pause, edit, and run scheduled tasks per agent inside
+     that agent's panel. Each run creates a thread marked with a schedule icon so that a
+     person can inspect it and reply to it directly. Scheduled tasks run on Codex or
+     Claude; Staf refuses to schedule a task on Antigravity for now (see
+     [decisions.md](decisions.md)).
+   - **Message attachments:** Save and display files produced by a run or chat (for
+     example, a newspaper PDF) right in the thread.
+   - **Unified Inbox and sidebar modes:** Add settle/unsettle state to threads, and let
+     each person choose between **Inbox mode** (unsettled threads and scheduled task runs
+     together until settled) and **Thread list mode** (chronological manual threads plus
+     a separate Inbox section for scheduled runs).
+   - **User-scoped preferences:** Store theme, heading font, and sidebar mode in
+     `staf.db` so that appearance settings sync across every browser and device (using
+     `localStorage` only as a pre-paint cache).
+   - **First live scheduled task:** Port the `morning-intel` skill from Hermes.
 3. **The Staf MCP server and memory v1.** Run tokens, the first Staf tools (inbox
    delivery, `memory`, `conversation_search`), and per-agent memory as designed in
-   [memory.md](memory.md), with its limits in the settings window. Check first that
-   Claude's `--safe-mode` accepts `--mcp-config`.
+   [memory.md](memory.md), with memory blocks and limits in each agent's panel and
+   proposals surfacing as cards in threads and the Inbox. Check first that Claude's
+   `--safe-mode` accepts `--mcp-config`.
 4. **Gmail.** Setup, a trigger for new mail, inbox monitoring, the personal feed that
-   `morning-intel` reads, and approvals for sending mail.
-5. **People.** A second person's account, their own agents and jobs, and per-person scoping.
-   Only agents owned by the account holder may allow harness apps.
+   `morning-intel` reads, and inline approval cards for sending mail in threads and the
+   Inbox.
+5. **People.** A second person's account, their own agents, scheduled tasks, preferences,
+   and per-person scoping. Only agents owned by the account holder may allow harness apps.
 6. **Reach.** Sign-in, home-network access, the PWA, and push notifications.
 
-Later: a larger memory system with benchmarks (see [memory.md](memory.md)), importing
-memories from other assistants, voice, an Expo app, Hermes as a harness, and more
-plugins.
+Later:
+- **Single-stream mode** per agent (one ongoing timeline alongside standard thread mode,
+  with clean session rollover backed by slice 3 memory and conversation search).
+- **Sub-tasks and agent-to-agent collaboration** (studying how harnesses and hosts such
+  as T3 Code orchestrate sub-tasks; letting agents coordinate with one another and join
+  group threads in both thread mode and single-stream mode).
+- A larger memory system with benchmarks (see [memory.md](memory.md)), importing memories
+  from other assistants, voice, an Expo app, Hermes as a harness, and more plugins.
 
 ## Known gaps
 

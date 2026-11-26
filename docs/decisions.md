@@ -3,6 +3,41 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-25: Scheduled task runs are threads, and the Inbox is a sidebar mode
+
+Every chat and every scheduled task run is stored as a **thread** (with a `source` field
+and optional schedule icon on scheduled runs), and attachments live on messages rather
+than on a separate inbox-item table. In **Settings → Appearance**, each person chooses
+between **Inbox mode** (unsettled threads and scheduled task runs appear together in the
+sidebar until settled) and **Thread list mode** (manual threads appear in a chronological
+list while scheduled task runs stay in an Inbox section).
+
+Why: unifying runs and threads means a person can reply directly to a scheduled task
+result, view attachments in any thread, and handle future memory proposals and approvals
+with the same settle flow. Keeping both sidebar modes lets people choose either a
+triage-first queue or a familiar chronological thread list without cluttering manual
+threads with automated runs.
+
+## 2026-11-25: Agent settings and scheduled tasks live in an agent panel
+
+Agent configuration (profile, instructions, defaults, access summary, and scheduled
+tasks — and later memory and integrations) moves out of the global Settings window into
+an agent-specific popup or drawer opened from the sidebar. Scheduled tasks belong to one
+agent rather than living in a cross-agent global list.
+
+Why: keeping every agent's growing set of features inside global Settings would clutter
+it quickly. Scoping scheduled tasks to their owning agent keeps the main screen clean and
+leaves room for one agent to orchestrate other agents later when needed.
+
+## 2026-11-25: Appearance and sidebar preferences sync per person on the host
+
+Theme, heading font, and sidebar mode (Inbox vs. Thread list) are user preferences stored
+in `staf.db` and synced across all of a person's browsers and devices. `localStorage`
+remains only as a fast pre-paint cache so that pages do not flash on load.
+
+Why: a person expects their appearance and workflow choices to follow them from laptop to
+phone rather than needing to be set up again in every browser.
+
 ## 2026-11-25: Agents live in the sidebar and filter the conversation list
 
 Agents sit in the left sidebar above the conversations instead of inside the pill under
