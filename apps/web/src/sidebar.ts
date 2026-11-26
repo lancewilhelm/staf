@@ -1,4 +1,44 @@
-import type { ThreadSummary } from "@staf/protocol";
+import type { SidebarMode, ThreadSummary } from "@staf/protocol";
+
+export interface SidebarSections {
+  /** Unsettled scheduled runs shown in a separate Inbox section in Thread list mode. */
+  scheduledInbox: ThreadSummary[];
+  /** Main list: unsettled threads in Inbox mode, or all manual threads in Thread list mode. */
+  main: ThreadSummary[];
+  /** Settled threads tucked into a collapsible section. */
+  settled: ThreadSummary[];
+}
+
+/**
+ * Splits visible threads into sidebar sections for the chosen sidebar mode.
+ * - Inbox mode: unsettled threads (manual and scheduled) stay in the main Inbox; settled ones tuck away.
+ * - Thread list mode: manual threads stay chronological in Threads; unsettled scheduled runs sit in
+ *   their own Inbox section above Threads, and settled scheduled runs tuck away below.
+ */
+export function partitionThreads(threads: ThreadSummary[], mode: SidebarMode): SidebarSections {
+  if (mode === "inbox") {
+    const main: ThreadSummary[] = [];
+    const settled: ThreadSummary[] = [];
+    for (const thread of threads) {
+      if (thread.settledAt === null) main.push(thread);
+      else settled.push(thread);
+    }
+    return { scheduledInbox: [], main, settled };
+  }
+
+  const scheduledInbox: ThreadSummary[] = [];
+  const main: ThreadSummary[] = [];
+  const settled: ThreadSummary[] = [];
+  for (const thread of threads) {
+    if (thread.source === "schedule") {
+      if (thread.settledAt === null) scheduledInbox.push(thread);
+      else settled.push(thread);
+    } else {
+      main.push(thread);
+    }
+  }
+  return { scheduledInbox, main, settled };
+}
 
 /**
  * The agent that the sidebar highlights and filters by: the open conversation's agent,

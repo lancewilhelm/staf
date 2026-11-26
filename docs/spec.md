@@ -245,13 +245,20 @@ Each slice is used live before the next one starts.
        Settings into a dedicated slide-over panel opened from the sidebar, structured with
        a section nav (**Profile** now, ready for **Scheduled tasks** and **Memory**). Keep
        global Settings focused on **Providers**, **Appearance**, and (later) **People**.
-   - 2b: unified Inbox, settle/unsettle state, sidebar modes, and message attachments.
-     - **Unified Inbox and sidebar modes:** Add settle/unsettle state to threads, and let
-       each person choose between **Inbox mode** (unsettled threads and scheduled task runs
-       together until settled) and **Thread list mode** (chronological manual threads plus
-       a separate Inbox section for scheduled runs).
-     - **Message attachments:** Save and display files produced by a run or chat (for
-       example, a newspaper PDF) right in the thread.
+   - 2b: unified Inbox, settle/unsettle state, sidebar modes, and message attachments. Done.
+     - **Unified Inbox and sidebar modes:** Add `source` (`"chat"` or `"schedule"`) and
+       `settledAt` state to threads (`PATCH /api/threads/:id` with `settled`, automatic
+       unsettle on reply, schedule clock icon on scheduled runs), and add the **Sidebar**
+       mode selector in **Settings → Appearance** to switch between **Inbox mode**
+       (unsettled threads and scheduled runs together until settled, with settled threads
+       tucked away) and **Thread list mode** (chronological manual threads plus a separate
+       Inbox section for unsettled scheduled runs).
+     - **Message attachments:** Store and serve files attached to messages in
+       `~/.staf/attachments/` (`POST /api/threads/:id/attachments`,
+       `POST /api/threads/:id/messages/:messageId/attachments`, `GET /api/attachments/:id`,
+       and live `message.attachment` events), attach files from the composer (copied into
+       the agent workspace so the harness can read them), and display inline images,
+       expandable PDF previews, and file download cards right in the thread.
    - 2c: per-agent scheduled tasks and the first live scheduled job.
      - **Scheduled tasks:** Define, pause, edit, and run scheduled tasks per agent inside
        that agent's panel. Each run creates a thread marked with a schedule icon so that a

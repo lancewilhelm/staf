@@ -10,6 +10,8 @@ export interface Paths {
   home: string;
   db: string;
   agents: string;
+  /** Stored message attachments, grouped by thread ID. */
+  attachments: string;
   /** CODEX_HOME for Staf's own Codex sign-in and configuration. */
   codexHome: string;
   /** Staf's own Antigravity data folder (agy's --gemini-dir). */
@@ -22,6 +24,7 @@ export function resolvePaths(env: Record<string, string | undefined> = process.e
     home,
     db: join(home, "staf.db"),
     agents: join(home, "agents"),
+    attachments: join(home, "attachments"),
     codexHome: join(home, "harness", "codex"),
     antigravityHome: join(home, "harness", "antigravity"),
   };

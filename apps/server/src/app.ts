@@ -35,6 +35,7 @@ export function createApp(options: AppOptions): App {
   const { paths } = options;
   mkdirSync(paths.home, { recursive: true, mode: 0o700 });
   mkdirSync(paths.agents, { recursive: true, mode: 0o700 });
+  mkdirSync(paths.attachments, { recursive: true, mode: 0o700 });
   mkdirSync(paths.codexHome, { recursive: true, mode: 0o700 });
 
   const store = new Store(paths.db);
@@ -55,7 +56,14 @@ export function createApp(options: AppOptions): App {
       ...(options.harnessOverride === "fake" ? [new FakeHarness({ delayMs: 40 })] : []),
     ];
   const harnesses = new Map(list.map((harness) => [harness.id, harness]));
-  const chat = new ChatService(store, agents, harnesses, bus, options.harnessOverride ?? null);
+  const chat = new ChatService(
+    store,
+    agents,
+    harnesses,
+    bus,
+    paths.attachments,
+    options.harnessOverride ?? null,
+  );
 
   const server = startHttp({
     hostname: options.hostname,

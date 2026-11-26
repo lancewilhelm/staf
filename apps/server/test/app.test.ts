@@ -399,6 +399,145 @@ describe("preferences over HTTP", () => {
   });
 });
 
+describe("threads settle state and source", () => {
+  test("creates chat and schedule threads, settles and unsettles them, and unsettles on reply", async () => {
+    const { client, app } = start();
+    const chat = await client.createThread();
+    expect(chat).toMatchObject({ source: "chat", settledAt: null });
+
+    const scheduled = await client.createThread({ source: "schedule" });
+    expect(scheduled).toMatchObject({ source: "schedule", settledAt: null });
+
+    const settledEvents = await collect(
+      client,
+      (event) => event.type === "thread.upserted" && event.thread.id === scheduled.id,
+      () => client.updateThread(scheduled.id, { settled: true }),
+    );
+    const settledThread = settledEvents.find((event) => event.type === "thread.upserted");
+    expect(settledThread?.type === "thread.upserted" && settledThread.thread.settledAt).toBeNumber();
+
+    // Replying to a settled thread moves it back into unsettled state automatically.
+    await client.sendMessage(scheduled.id, "Tell me more");
+    await app.chat.idle();
+    expect((await client.getThread(scheduled.id)).thread.settledAt).toBeNull();
+
+    // Explicit unsettle works too, and invalid values are rejected.
+    await client.updateThread(chat.id, { settled: true });
+    expect((await client.getThread(chat.id)).thread.settledAt).toBeNumber();
+    const reopened = await client.updateThread(chat.id, { settled: false });
+    expect(reopened.settledAt).toBeNull();
+
+    await expect(client.createThread({ source: "email" as never })).rejects.toMatchObject({ status: 400 });
+    await expect(client.updateThread(chat.id, { settled: "yes" as never })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("message attachments", () => {
+  test("uploads pending files, binds them to a user message, copies them to the workspace, and cleans up on delete", async () => {
+    const { client, app, harness, paths, url } = start();
+    const thread = await client.createThread();
+
+    const pdfBytes = new TextEncoder().encode("%PDF-1.4\n% minimal test pdf\n");
+    const uploaded = await client.uploadAttachment(
+      thread.id,
+      new Blob([pdfBytes], { type: "application/pdf" }),
+      "../morning paper.pdf",
+    );
+    expect(uploaded).toMatchObject({
+      threadId: thread.id,
+      messageId: null,
+      name: "morning paper.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: pdfBytes.byteLength,
+    });
+
+    await client.sendMessage(thread.id, "", [uploaded.id]);
+    await app.chat.idle();
+
+    const detail = await client.getThread(thread.id);
+    expect(detail.thread.title).toBe("morning paper.pdf");
+    expect(detail.messages[0]!.attachments).toHaveLength(1);
+    expect(detail.messages[0]!.attachments[0]).toMatchObject({
+      id: uploaded.id,
+      name: "morning paper.pdf",
+      mimeType: "application/pdf",
+    });
+
+    // The harness received a workspace path to the uploaded file.
+    expect(harness.requests[0]!.input).toContain("attachments/");
+    expect(harness.requests[0]!.input).toContain("morning-paper.pdf");
+    const workspaceAttachments = readdirSync(join(paths.agents, "default", "workspace", "attachments"));
+    expect(workspaceAttachments.some((name) => name.endsWith("morning-paper.pdf"))).toBe(true);
+
+    // Inline view and forced download headers work as expected.
+    const inlineRes = await fetch(`${url}${uploaded.url}`);
+    expect(inlineRes.status).toBe(200);
+    expect(inlineRes.headers.get("content-type")).toBe("application/pdf");
+    expect(inlineRes.headers.get("content-disposition")).toStartWith("inline;");
+    expect(inlineRes.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await inlineRes.text()).toBe("%PDF-1.4\n% minimal test pdf\n");
+
+    const downloadRes = await fetch(`${url}${uploaded.url}?download=1`);
+    expect(downloadRes.headers.get("content-disposition")).toStartWith("attachment;");
+
+    // Deleting the thread deletes its attachment files on disk.
+    await client.deleteThread(thread.id);
+    expect(existsSync(join(paths.attachments, thread.id))).toBe(false);
+    expect((await fetch(`${url}${uploaded.url}`)).status).toBe(404);
+  });
+
+  test("attaches files directly to an assistant message, streams message.attachment, and forces download for HTML", async () => {
+    const { client, app, url } = start();
+    const thread = await client.createThread({ source: "schedule" });
+    await client.sendMessage(thread.id, "Make today's briefing");
+    await app.chat.idle();
+
+    const detail = await client.getThread(thread.id);
+    const assistant = detail.messages[1]!;
+
+    const events = await collect(
+      client,
+      (event) => event.type === "message.attachment",
+      () =>
+        client.uploadAttachment(
+          thread.id,
+          new Blob(["<h1>Report</h1>"], { type: "text/html" }),
+          "report.html",
+          assistant.id,
+        ),
+    );
+    const attachmentEvent = events.find((event) => event.type === "message.attachment");
+    expect(attachmentEvent?.type === "message.attachment" && attachmentEvent.attachment).toMatchObject({
+      threadId: thread.id,
+      messageId: assistant.id,
+      name: "report.html",
+      mimeType: "text/html",
+    });
+
+    const refreshed = await client.getThread(thread.id);
+    expect(refreshed.messages[1]!.attachments).toHaveLength(1);
+
+    // HTML attachments must never be served inline.
+    const htmlRes = await fetch(`${url}${refreshed.messages[1]!.attachments[0]!.url}`);
+    expect(htmlRes.status).toBe(200);
+    expect(htmlRes.headers.get("content-disposition")).toStartWith("attachment;");
+    expect(htmlRes.headers.get("x-content-type-options")).toBe("nosniff");
+
+    // Empty uploads and missing x-staf-client header are rejected.
+    await expect(
+      client.uploadAttachment(thread.id, new Blob([], { type: "text/plain" }), "empty.txt"),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const form = new FormData();
+    form.append("file", new Blob(["hi"], { type: "text/plain" }), "hi.txt");
+    const csrfRes = await fetch(`${url}/api/threads/${thread.id}/attachments`, {
+      method: "POST",
+      body: form,
+    });
+    expect(csrfRes.status).toBe(403);
+  });
+});
+
 describe("Store migration", () => {
   test("upgrades a version 1 database, records its sessions, and adds preferences", () => {
     const home = mkdtempSync(join(tmpdir(), "staf-store-"));
@@ -416,11 +555,18 @@ describe("Store migration", () => {
     v1.close();
 
     const store = new Store(path);
-    expect(store.getThread("t1")).toMatchObject({ harness: "codex", model: null, sessionId: "codex-session" });
+    expect(store.getThread("t1")).toMatchObject({
+      harness: "codex",
+      model: null,
+      source: "chat",
+      settledAt: null,
+      sessionId: "codex-session",
+    });
     expect(store.listSessions("t1")).toEqual([{ harness: "codex", sessionId: "codex-session", threadId: "t1" }]);
     const [user, assistant] = store.listMessages("t1");
     expect(user!.harness).toBeUndefined();
-    expect(assistant).toMatchObject({ harness: "codex", model: null });
+    expect(user!.attachments).toEqual([]);
+    expect(assistant).toMatchObject({ harness: "codex", model: null, attachments: [] });
     expect(store.getPreferences()).toEqual({ theme: "system", heroFont: "bricolage", sidebarMode: "list" });
     expect(store.updatePreferences({ theme: "light" })).toEqual({
       theme: "light",

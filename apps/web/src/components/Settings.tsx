@@ -1,4 +1,4 @@
-import type { HarnessInfo, HeroFont, ThemePreference } from "@staf/protocol";
+import type { HarnessInfo, HeroFont, SidebarMode, ThemePreference } from "@staf/protocol";
 import { useEffect, useRef } from "react";
 import {
   closeSettings,
@@ -129,9 +129,23 @@ const HERO_FONTS: Array<{ id: HeroFont; label: string; hint: string }> = [
   { id: "serif", label: "System serif", hint: "Serif · Classic" },
 ];
 
+const SIDEBAR_MODE_OPTIONS: Array<{ id: SidebarMode; label: string; hint: string }> = [
+  {
+    id: "inbox",
+    label: "Inbox",
+    hint: "Active threads and scheduled runs stay in your Inbox until settled",
+  },
+  {
+    id: "list",
+    label: "Thread list",
+    hint: "Chronological thread list, with scheduled runs in a separate Inbox section",
+  },
+];
+
 function AppearancePane() {
   const setting = useStore((s) => s.preferences.theme);
   const font = useStore((s) => s.preferences.heroFont);
+  const sidebarMode = useStore((s) => s.preferences.sidebarMode);
   const sample = useStore((s) => {
     const thread = s.threads.find((t) => t.id === s.threadId);
     return s.agents.find((a) => a.id === (thread?.agentId ?? s.agentId))?.name ?? "Staf";
@@ -186,10 +200,64 @@ function AppearancePane() {
         ))}
       </div>
 
+      <h3 className="appearance-heading">Sidebar</h3>
+      <div className="sidebar-mode-options" role="radiogroup" aria-label="Sidebar mode">
+        {SIDEBAR_MODE_OPTIONS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={sidebarMode === option.id}
+            className={`theme-option${sidebarMode === option.id ? " selected" : ""}`}
+            onClick={() => void updatePreferences({ sidebarMode: option.id })}
+          >
+            <span className="mode-swatch" aria-hidden="true">
+              <MiniSidebar mode={option.id} />
+            </span>
+            <span className="theme-label">{option.label}</span>
+            <span className="theme-hint">{option.hint}</span>
+          </button>
+        ))}
+      </div>
+
       <p className="field-note">
-        Theme and heading font are saved on your Staf host and sync across your browsers and devices.
+        Theme, heading font, and sidebar mode are saved on your Staf host and sync across your browsers and devices.
       </p>
     </div>
+  );
+}
+
+/** A tiny diagram of the sidebar in Inbox mode vs. Thread list mode. */
+function MiniSidebar({ mode }: { mode: SidebarMode }) {
+  if (mode === "inbox") {
+    return (
+      <span className="mini-sidebar">
+        <span className="mini-sidebar-head">Inbox</span>
+        <span className="mini-sidebar-row">
+          <span className="mini-sidebar-dot" />
+          <span className="mini-sidebar-bar" />
+          <span className="mini-sidebar-check" />
+        </span>
+        <span className="mini-sidebar-row">
+          <span className="mini-sidebar-bar short" />
+          <span className="mini-sidebar-check" />
+        </span>
+        <span className="mini-sidebar-foot">Settled</span>
+      </span>
+    );
+  }
+  return (
+    <span className="mini-sidebar">
+      <span className="mini-sidebar-head">Inbox</span>
+      <span className="mini-sidebar-row">
+        <span className="mini-sidebar-dot" />
+        <span className="mini-sidebar-bar short" />
+      </span>
+      <span className="mini-sidebar-head">Threads</span>
+      <span className="mini-sidebar-row">
+        <span className="mini-sidebar-bar" />
+      </span>
+    </span>
   );
 }
 

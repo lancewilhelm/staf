@@ -3,6 +3,9 @@
 
 export type ThreadStatus = "idle" | "running";
 
+/** How a thread started: a person's chat or a scheduled task run. */
+export type ThreadSource = "chat" | "schedule";
+
 export interface ThreadSummary {
   id: string;
   title: string;
@@ -15,6 +18,10 @@ export interface ThreadSummary {
   effort: string | null;
   /** Whether answers use the harness's faster, more expensive mode. */
   fast: boolean;
+  /** Whether this thread was started manually or by a scheduled task. */
+  source: ThreadSource;
+  /** Unix time in milliseconds when this thread was settled, or null while active. */
+  settledAt: number | null;
   status: ThreadStatus;
   /** Unix time in milliseconds. */
   createdAt: number;
@@ -50,6 +57,20 @@ export interface Activity {
   completedAt?: number;
 }
 
+/** A file attached to a message, such as a generated PDF or an uploaded document. */
+export interface Attachment {
+  id: string;
+  threadId: string;
+  /** The message this attachment belongs to, or null while pending send. */
+  messageId: string | null;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** Relative URL on the host to view or download the file. */
+  url: string;
+  createdAt: number;
+}
+
 export interface Message {
   id: string;
   threadId: string;
@@ -57,6 +78,8 @@ export interface Message {
   /** Markdown text. For an assistant message that is still streaming, the text so far. */
   text: string;
   activities: Activity[];
+  /** Files attached to this message. */
+  attachments: Attachment[];
   status: MessageStatus;
   error?: string;
   /** For assistant messages: the harness and model that wrote the answer. */
@@ -155,14 +178,18 @@ export interface CreateThreadRequest {
   effort?: string | null;
   /** Overrides the agent's fast mode setting. */
   fast?: boolean;
+  /** Defaults to "chat". */
+  source?: ThreadSource;
 }
 
-/** Changes how a conversation is answered from the next message on. */
+/** Changes how a thread is answered from the next message on, or settles/unsettles it. */
 export interface UpdateThreadRequest {
   harness?: string;
   model?: string | null;
   effort?: string | null;
   fast?: boolean;
+  /** True settles the thread; false moves it back to unsettled. */
+  settled?: boolean;
 }
 
 export interface LoginStart {
@@ -172,6 +199,8 @@ export interface LoginStart {
 
 export interface SendMessageRequest {
   text: string;
+  /** Pending attachment IDs uploaded to this thread to attach to the user message. */
+  attachmentIds?: string[];
 }
 
 export interface SendMessageResponse {
@@ -202,6 +231,7 @@ export type StreamEvent =
   /** Replaces the whole text of a streaming message. */
   | { type: "message.text"; threadId: string; messageId: string; text: string }
   | { type: "message.activity"; threadId: string; messageId: string; activity: Activity }
+  | { type: "message.attachment"; threadId: string; messageId: string; attachment: Attachment }
   | { type: "message.completed"; message: Message }
   /** Agents were added, changed, or removed. */
   | { type: "agents.changed" }

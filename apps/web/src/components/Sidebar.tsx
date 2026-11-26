@@ -1,6 +1,14 @@
+import type { ThreadSummary } from "@staf/protocol";
 import { useState } from "react";
-import { activeAgentId, agentInitial, groupThreads, runningAgents, visibleThreads } from "../sidebar.ts";
-import { deleteThread, openAgentPanel, openSettings, openThread, startChat, useStore } from "../store.ts";
+import {
+  activeAgentId,
+  agentInitial,
+  groupThreads,
+  partitionThreads,
+  runningAgents,
+  visibleThreads,
+} from "../sidebar.ts";
+import { deleteThread, openAgentPanel, openSettings, openThread, settleThread, startChat, useStore } from "../store.ts";
 import { Icon } from "./Icon.tsx";
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -8,14 +16,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const current = useStore((s) => s.threadId);
   const agents = useStore((s) => s.agents);
   const selectedAgent = useStore((s) => s.agentId);
+  const sidebarMode = useStore((s) => s.preferences.sidebarMode);
   const [showAll, setShowAll] = useState(false);
+  const [settledOpen, setSettledOpen] = useState(false);
 
   const currentAgentId = activeAgentId(threads, current, selectedAgent);
   const currentAgent = agents.find((agent) => agent.id === currentAgentId) ?? null;
   const showingAll = showAll && agents.length > 1;
   const shownThreads = visibleThreads(threads, currentAgentId, showingAll);
+  const { scheduledInbox, main, settled } = partitionThreads(shownThreads, sidebarMode);
   const running = runningAgents(threads);
   const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
+  const isInboxMode = sidebarMode === "inbox";
 
   const go = (id: string) => {
     openThread(id);
@@ -32,6 +44,17 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     setShowAll(false);
     onClose();
   };
+
+  const emptyMainText = (() => {
+    if (isInboxMode && settled.length > 0) {
+      return !showingAll && currentAgent && agents.length > 1
+        ? `Inbox is clear for ${currentAgent.name}.`
+        : "Inbox is clear.";
+    }
+    return !showingAll && currentAgent && agents.length > 1
+      ? `No threads with ${currentAgent.name} yet.`
+      : "No threads yet.";
+  })();
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
@@ -93,9 +116,32 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </section>
 
-      <nav className="thread-list" aria-label="Threads">
+      <nav className="thread-list" aria-label={isInboxMode ? "Inbox" : "Threads"}>
+        {!isInboxMode && scheduledInbox.length > 0 && (
+          <section className="sidebar-inbox-block" aria-label="Inbox">
+            <div className="sidebar-section-head">
+              <h2>
+                Inbox <span className="sidebar-count">{scheduledInbox.length}</span>
+              </h2>
+            </div>
+            {scheduledInbox.map((thread) => (
+              <ThreadRow
+                key={thread.id}
+                thread={thread}
+                active={thread.id === current}
+                owner={showingAll ? agentNames.get(thread.agentId) : undefined}
+                showSettle
+                onOpen={go}
+              />
+            ))}
+          </section>
+        )}
+
         <div className="sidebar-section-head">
-          <h2>Threads</h2>
+          <h2>
+            {isInboxMode ? "Inbox" : "Threads"}
+            {isInboxMode && main.length > 0 && <span className="sidebar-count">{main.length}</span>}
+          </h2>
           {agents.length > 1 && (
             <button
               type="button"
@@ -112,43 +158,57 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             </button>
           )}
         </div>
-        {shownThreads.length === 0 ? (
-          <p className="thread-empty">
-            {!showingAll && currentAgent && agents.length > 1
-              ? `No threads with ${currentAgent.name} yet.`
-              : "No threads yet."}
-          </p>
+
+        {main.length === 0 ? (
+          <p className="thread-empty">{emptyMainText}</p>
         ) : (
-          groupThreads(shownThreads).map(([label, items]) => (
+          groupThreads(main).map(([label, items]) => (
             <section key={label}>
               <h3>{label}</h3>
-              {items.map((thread) => {
-                const owner = showingAll ? agentNames.get(thread.agentId) : undefined;
-                return (
-                  <div key={thread.id} className={`thread-row${thread.id === current ? " active" : ""}`}>
-                    <button type="button" className="thread-link" onClick={() => go(thread.id)}>
-                      {thread.status === "running" && <span className="live-dot" aria-label="Answering" />}
-                      <span className="thread-meta">
-                        <span className="thread-title">{thread.title}</span>
-                        {owner && <span className="thread-agent">{owner}</span>}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="thread-delete"
-                      aria-label={`Delete "${thread.title}"`}
-                      title="Delete"
-                      onClick={() => {
-                        if (confirm(`Delete "${thread.title}"?`)) void deleteThread(thread.id);
-                      }}
-                    >
-                      <Icon name="trash" size={15} />
-                    </button>
-                  </div>
-                );
-              })}
+              {items.map((thread) => (
+                <ThreadRow
+                  key={thread.id}
+                  thread={thread}
+                  active={thread.id === current}
+                  owner={showingAll ? agentNames.get(thread.agentId) : undefined}
+                  showSettle={isInboxMode}
+                  onOpen={go}
+                />
+              ))}
             </section>
           ))
+        )}
+
+        {settled.length > 0 && (
+          <section className="settled-group">
+            <button
+              type="button"
+              className={`settled-toggle${settledOpen ? " open" : ""}`}
+              aria-expanded={settledOpen}
+              onClick={() => setSettledOpen((value) => !value)}
+            >
+              <span className="chevron" aria-hidden="true">
+                <Icon name="chevron" size={13} />
+              </span>
+              <span>{isInboxMode ? "Settled" : "Settled runs"}</span>
+              <span className="sidebar-count">{settled.length}</span>
+            </button>
+            {settledOpen && (
+              <div className="settled-list">
+                {settled.map((thread) => (
+                  <ThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    active={thread.id === current}
+                    owner={showingAll ? agentNames.get(thread.agentId) : undefined}
+                    showSettle
+                    muted
+                    onOpen={go}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         )}
       </nav>
 
@@ -166,5 +226,61 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </button>
       </div>
     </aside>
+  );
+}
+
+function ThreadRow({
+  thread,
+  active,
+  owner,
+  showSettle,
+  muted,
+  onOpen,
+}: {
+  thread: ThreadSummary;
+  active: boolean;
+  owner?: string;
+  showSettle: boolean;
+  muted?: boolean;
+  onOpen: (id: string) => void;
+}) {
+  const isSettled = thread.settledAt !== null;
+  return (
+    <div className={`thread-row${active ? " active" : ""}${muted ? " settled" : ""}`}>
+      <button type="button" className="thread-link" onClick={() => onOpen(thread.id)}>
+        {thread.status === "running" && <span className="live-dot" aria-label="Answering" />}
+        {thread.source === "schedule" && (
+          <span className="schedule-mark" title="Scheduled task" aria-label="Scheduled task">
+            <Icon name="clock" size={13} />
+          </span>
+        )}
+        <span className="thread-meta">
+          <span className="thread-title">{thread.title}</span>
+          {owner && <span className="thread-agent">{owner}</span>}
+        </span>
+      </button>
+      {showSettle && (
+        <button
+          type="button"
+          className="thread-action"
+          aria-label={isSettled ? `Move "${thread.title}" to Inbox` : `Settle "${thread.title}"`}
+          title={isSettled ? "Move to Inbox" : "Settle"}
+          onClick={() => void settleThread(thread.id, !isSettled)}
+        >
+          <Icon name={isSettled ? "inbox" : "check"} size={14} />
+        </button>
+      )}
+      <button
+        type="button"
+        className="thread-delete"
+        aria-label={`Delete "${thread.title}"`}
+        title="Delete"
+        onClick={() => {
+          if (confirm(`Delete "${thread.title}"?`)) void deleteThread(thread.id);
+        }}
+      >
+        <Icon name="trash" size={15} />
+      </button>
+    </div>
   );
 }

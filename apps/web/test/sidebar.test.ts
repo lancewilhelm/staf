@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { ThreadSummary } from "@staf/protocol";
-import { activeAgentId, agentInitial, groupThreads, runningAgents, visibleThreads } from "../src/sidebar.ts";
+import {
+  activeAgentId,
+  agentInitial,
+  groupThreads,
+  partitionThreads,
+  runningAgents,
+  visibleThreads,
+} from "../src/sidebar.ts";
 import { DEFAULT_HERO_FONT, parseHeroFont } from "../src/theme.ts";
 
 function makeThread(overrides: Partial<ThreadSummary> & { id: string }): ThreadSummary {
@@ -11,6 +18,8 @@ function makeThread(overrides: Partial<ThreadSummary> & { id: string }): ThreadS
     model: null,
     effort: null,
     fast: false,
+    source: "chat",
+    settledAt: null,
     status: "idle",
     createdAt: 0,
     updatedAt: 0,
@@ -82,5 +91,24 @@ describe("sidebar helpers", () => {
     expect(parseHeroFont("serif")).toBe("serif");
     expect(parseHeroFont("unknown")).toBe(DEFAULT_HERO_FONT);
     expect(parseHeroFont(null)).toBe(DEFAULT_HERO_FONT);
+  });
+
+  test("partitionThreads separates Inbox and Thread list sections cleanly", () => {
+    const threads = [
+      makeThread({ id: "chat-active", source: "chat", settledAt: null }),
+      makeThread({ id: "chat-settled", source: "chat", settledAt: 100 }),
+      makeThread({ id: "sched-active", source: "schedule", settledAt: null }),
+      makeThread({ id: "sched-settled", source: "schedule", settledAt: 200 }),
+    ];
+
+    const inbox = partitionThreads(threads, "inbox");
+    expect(inbox.scheduledInbox).toEqual([]);
+    expect(inbox.main.map((t) => t.id)).toEqual(["chat-active", "sched-active"]);
+    expect(inbox.settled.map((t) => t.id)).toEqual(["chat-settled", "sched-settled"]);
+
+    const list = partitionThreads(threads, "list");
+    expect(list.scheduledInbox.map((t) => t.id)).toEqual(["sched-active"]);
+    expect(list.main.map((t) => t.id)).toEqual(["chat-active", "chat-settled"]);
+    expect(list.settled.map((t) => t.id)).toEqual(["sched-settled"]);
   });
 });

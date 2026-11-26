@@ -10,7 +10,8 @@ different folder, for example on a server's data disk.
 
 | Path | Contents | Written by |
 |---|---|---|
-| `staf.db` | Conversations and messages (SQLite) | Staf |
+| `staf.db` | Threads, messages, attachments metadata, and user preferences (SQLite) | Staf |
+| `attachments/<thread-id>/` | Uploaded and agent-delivered message attachment files | Staf |
 | `agents/<id>/agent.json` | An agent's settings | You |
 | `agents/<id>/AGENTS.md` | An agent's instructions | You |
 | `agents/<id>/workspace/` | Files that the agent creates: notes, scripts, skills, reports | The agent |

@@ -5,7 +5,9 @@ import {
   type AgentSummary,
   type HealthInfo,
   type StreamEvent,
+  type ThreadSource,
   type UpdatePreferencesRequest,
+  type UpdateThreadRequest,
 } from "@staf/protocol";
 import type { HTMLBundle, Server } from "bun";
 import {
@@ -17,6 +19,7 @@ import {
   type Agents,
   DEFAULT_AGENT_ID,
 } from "./agents.ts";
+import { contentDisposition, isInlineMime } from "./attachments.ts";
 import type { EventBus } from "./bus.ts";
 import { ChatError, type ChatService } from "./chat.ts";
 import { VERSION } from "./config.ts";
@@ -146,13 +149,14 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       POST: api(async (req) => {
         const body = await readJson(req);
         const agentId = typeof body.agentId === "string" ? body.agentId : undefined;
-        return json(chat.createThread(agentId, readChoice(body)), 201);
+        const source = readSource(body.source);
+        return json(chat.createThread(agentId, { ...readChoice(body), ...(source ? { source } : {}) }), 201);
       }),
     },
     "/api/threads/:id": {
       GET: api((req) => json(chat.getThread(req.params.id!))),
       PATCH: api(async (req) => {
-        return json(chat.updateThread(req.params.id!, readChoice(await readJson(req))));
+        return json(chat.updateThread(req.params.id!, readThreadPatch(await readJson(req))));
       }),
       DELETE: api(async (req) => {
         await chat.deleteThread(req.params.id!);
@@ -161,9 +165,40 @@ export function startHttp(options: HttpOptions): Server<undefined> {
     },
     "/api/threads/:id/messages": {
       POST: api(async (req) => {
-        const body = (await readJson(req)) as { text?: unknown };
+        const body = await readJson(req);
         if (typeof body.text !== "string") throw new ChatError(400, "Send a text message.");
-        return json(chat.send(req.params.id!, body.text), 201);
+        const attachmentIds = readAttachmentIds(body.attachmentIds);
+        return json(chat.send(req.params.id!, body.text, attachmentIds), 201);
+      }),
+    },
+    "/api/threads/:id/attachments": {
+      POST: api(async (req) => {
+        const uploaded = await readUploadedFile(req);
+        return json(chat.uploadAttachment(req.params.id!, uploaded), 201);
+      }),
+    },
+    "/api/threads/:id/messages/:messageId/attachments": {
+      POST: api(async (req) => {
+        const uploaded = await readUploadedFile(req);
+        return json(chat.attachToMessage(req.params.id!, req.params.messageId!, uploaded), 201);
+      }),
+    },
+    "/api/attachments/:id": {
+      GET: api((req) => {
+        const { attachment, fullPath } = chat.getAttachmentFile(req.params.id!);
+        const url = new URL(req.url);
+        const forceDownload = url.searchParams.get("download") === "1";
+        const inline = !forceDownload && isInlineMime(attachment.mimeType);
+        const headers: Record<string, string> = {
+          "content-type": attachment.mimeType,
+          "content-disposition": contentDisposition(attachment.name, inline),
+          "x-content-type-options": "nosniff",
+          "cache-control": "private, max-age=31536000, immutable",
+        };
+        if (inline && attachment.mimeType !== "application/pdf") {
+          headers["content-security-policy"] = "default-src 'none'";
+        }
+        return new Response(Bun.file(fullPath), { headers });
       }),
     },
     "/api/threads/:id/interrupt": {
@@ -286,6 +321,48 @@ function eventStream(req: Request, server: Server<undefined>, bus: EventBus): Re
       connection: "keep-alive",
     },
   });
+}
+
+function readSource(value: unknown): ThreadSource | undefined {
+  if (value === undefined) return undefined;
+  if (value === "chat" || value === "schedule") return value;
+  throw new ChatError(400, 'Thread source must be "chat" or "schedule".');
+}
+
+function readThreadPatch(body: Record<string, unknown>): UpdateThreadRequest {
+  const patch: UpdateThreadRequest = readChoice(body);
+  if (body.settled !== undefined) {
+    if (typeof body.settled !== "boolean") throw new ChatError(400, "Settled must be true or false.");
+    patch.settled = body.settled;
+  }
+  return patch;
+}
+
+function readAttachmentIds(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new ChatError(400, "Attachment IDs must be an array of strings.");
+  }
+  return value as string[];
+}
+
+async function readUploadedFile(req: Request): Promise<{ name: string; mimeType: string | null; bytes: Uint8Array }> {
+  const type = req.headers.get("content-type") ?? "";
+  if (!type.toLowerCase().includes("multipart/form-data")) {
+    throw new ChatError(400, "Upload files as multipart/form-data.");
+  }
+  let file: unknown;
+  try {
+    const form = await req.formData();
+    file = form.get("file");
+  } catch {
+    throw new ChatError(400, "Could not read the uploaded form data.");
+  }
+  if (!(file instanceof File)) {
+    throw new ChatError(400, 'Include a file in the "file" form field.');
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return { name: file.name || "attachment", mimeType: file.type || null, bytes };
 }
 
 /** Reads the harness, model, reasoning level, and fast mode that a conversation asks for. */

@@ -1,8 +1,9 @@
 import type { Message } from "@staf/protocol";
 import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
-import { modelName, sendMessage, stopAnswer, useStore, useHarnesses } from "../store.ts";
+import { modelName, sendMessage, settleThread, stopAnswer, useStore, useHarnesses } from "../store.ts";
 import { ChatPill } from "./ChatPill.tsx";
 import { Composer } from "./Composer.tsx";
+import { Icon } from "./Icon.tsx";
 import { MessageView } from "./MessageView.tsx";
 
 const EMPTY: Message[] = [];
@@ -14,6 +15,7 @@ export function ChatView() {
   const running = thread?.status === "running" || messages.some((m) => m.status === "streaming");
   const agents = useStore((s) => s.agents);
   const agentId = useStore((s) => s.agentId);
+  const sidebarMode = useStore((s) => s.preferences.sidebarMode);
   const currentAgent = agents.find((agent) => agent.id === (thread?.agentId ?? agentId)) ?? null;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -44,7 +46,7 @@ export function ChatView() {
             running={false}
             autoFocus
             placeholder={currentAgent ? `Message ${currentAgent.name}` : "Message Staf"}
-            onSend={(text) => void sendMessage(text)}
+            onSend={(text, files) => void sendMessage(text, files)}
             onStop={() => {}}
           />
           <div className="composer-meta">
@@ -55,8 +57,34 @@ export function ChatView() {
     );
   }
 
+  const showThreadBar =
+    thread !== null && (sidebarMode === "inbox" || thread.source === "schedule" || thread.settledAt !== null);
+
   return (
     <main className="chat">
+      {showThreadBar && (
+        <div className="thread-bar">
+          <div className="thread-bar-inner column">
+            <div className="thread-bar-title">
+              {thread.source === "schedule" && (
+                <span className="schedule-mark" title="Scheduled task" aria-label="Scheduled task">
+                  <Icon name="clock" size={14} />
+                </span>
+              )}
+              <span className="thread-bar-name">{thread.title}</span>
+              {thread.settledAt !== null && <span className="settled-tag">Settled</span>}
+            </div>
+            <button
+              type="button"
+              className="thread-bar-action"
+              onClick={() => void settleThread(thread.id, thread.settledAt === null)}
+            >
+              <Icon name={thread.settledAt === null ? "check" : "inbox"} size={14} />
+              <span>{thread.settledAt === null ? "Settle" : "Move to Inbox"}</span>
+            </button>
+          </div>
+        </div>
+      )}
       <div className="messages" ref={scroller} onScroll={onScroll}>
         <div className="column">
           {messages.map((message, index) => (
@@ -73,7 +101,7 @@ export function ChatView() {
             running={running}
             autoFocus
             placeholder={currentAgent && agents.length > 1 ? `Ask ${currentAgent.name} a follow-up` : "Ask a follow-up"}
-            onSend={(text) => void sendMessage(text)}
+            onSend={(text, files) => void sendMessage(text, files)}
             onStop={() => void stopAnswer()}
           />
           <div className="composer-meta">

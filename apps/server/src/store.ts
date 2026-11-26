@@ -5,16 +5,18 @@ import {
   isSidebarMode,
   isThemePreference,
   type Activity,
+  type Attachment,
   type Message,
   type MessageRole,
   type MessageStatus,
+  type ThreadSource,
   type ThreadStatus,
   type ThreadSummary,
   type UpdatePreferencesRequest,
   type UserPreferences,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const DEFAULT_PERSON_ID = "default";
 
 interface ThreadRow {
@@ -25,10 +27,28 @@ interface ThreadRow {
   model: string | null;
   effort: string | null;
   fast: number;
+  source: ThreadSource;
+  settled_at: number | null;
   session_id: string | null;
   status: ThreadStatus;
   created_at: number;
   updated_at: number;
+}
+
+interface AttachmentRow {
+  id: string;
+  thread_id: string;
+  message_id: string | null;
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  storage_path: string;
+  created_at: number;
+}
+
+export interface StoredAttachment extends Attachment {
+  /** Path relative to the host's attachments folder. */
+  storagePath: string;
 }
 
 interface MessageRow {
@@ -88,6 +108,28 @@ export class Store {
     if (version < 2) this.migrateToV2();
     if (version < 3) this.migrateToV3();
     if (version < 4) this.migrateToV4();
+    if (version < 5) this.migrateToV5();
+  }
+
+  private migrateToV5(): void {
+    this.db.transaction(() => {
+      this.db.run("ALTER TABLE threads ADD COLUMN source TEXT NOT NULL DEFAULT 'chat'");
+      this.db.run("ALTER TABLE threads ADD COLUMN settled_at INTEGER");
+      this.db.run(`
+        CREATE TABLE attachments (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+          message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          mime_type TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          storage_path TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )`);
+      this.db.run("CREATE INDEX attachments_by_message ON attachments(message_id, created_at)");
+      this.db.run("CREATE INDEX attachments_by_thread ON attachments(thread_id)");
+      this.db.run("PRAGMA user_version = 5");
+    })();
   }
 
   private migrateToV4(): void {
@@ -188,6 +230,7 @@ export class Store {
     model: string | null;
     effort: string | null;
     fast: boolean;
+    source?: ThreadSource;
   }): StoredThread {
     const now = Date.now();
     const thread: StoredThread = {
@@ -198,6 +241,8 @@ export class Store {
       model: input.model,
       effort: input.effort,
       fast: input.fast,
+      source: input.source ?? "chat",
+      settledAt: null,
       sessionId: null,
       status: "idle",
       createdAt: now,
@@ -205,8 +250,8 @@ export class Store {
     };
     this.db
       .query(
-        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, session_id, status, created_at, updated_at)
-         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, NULL, $status, $createdAt, $updatedAt)`,
+        `INSERT INTO threads (id, title, agent_id, harness, model, effort, fast, source, settled_at, session_id, status, created_at, updated_at)
+         VALUES ($id, $title, $agentId, $harness, $model, $effort, $fast, $source, NULL, NULL, $status, $createdAt, $updatedAt)`,
       )
       .run({
         id: thread.id,
@@ -216,6 +261,7 @@ export class Store {
         model: thread.model,
         effort: thread.effort,
         fast: thread.fast ? 1 : 0,
+        source: thread.source,
         status: thread.status,
         createdAt: thread.createdAt,
         updatedAt: thread.updatedAt,
@@ -245,6 +291,7 @@ export class Store {
       model?: string | null;
       effort?: string | null;
       fast?: boolean;
+      settledAt?: number | null;
       sessionId?: string | null;
       status?: ThreadStatus;
       touch?: boolean;
@@ -259,6 +306,7 @@ export class Store {
       model: patch.model === undefined ? current.model : patch.model,
       effort: patch.effort === undefined ? current.effort : patch.effort,
       fast: patch.fast ?? current.fast,
+      settledAt: patch.settledAt === undefined ? current.settledAt : patch.settledAt,
       sessionId: patch.sessionId === undefined ? current.sessionId : patch.sessionId,
       status: patch.status ?? current.status,
       updatedAt: patch.touch ? Date.now() : current.updatedAt,
@@ -266,7 +314,7 @@ export class Store {
     this.db
       .query(
         `UPDATE threads SET title = $title, harness = $harness, model = $model, effort = $effort, fast = $fast,
-           session_id = $sessionId, status = $status, updated_at = $updatedAt WHERE id = $id`,
+           settled_at = $settledAt, session_id = $sessionId, status = $status, updated_at = $updatedAt WHERE id = $id`,
       )
       .run({
         id,
@@ -275,6 +323,7 @@ export class Store {
         model: next.model,
         effort: next.effort,
         fast: next.fast ? 1 : 0,
+        settledAt: next.settledAt,
         sessionId: next.sessionId,
         status: next.status,
         updatedAt: next.updatedAt,
@@ -322,6 +371,7 @@ export class Store {
       role: input.role,
       text: input.text,
       activities: [],
+      attachments: [],
       status: input.status,
       ...(input.harness ? { harness: input.harness, model: input.model ?? null } : {}),
       createdAt: Date.now(),
@@ -382,14 +432,95 @@ export class Store {
     const row = this.db.query("SELECT * FROM messages WHERE id = $id").get({ id }) as
       | MessageRow
       | null;
-    return row ? toMessage(row) : null;
+    if (!row) return null;
+    return toMessage(row, this.listAttachmentsForMessage(id).map(publicAttachment));
   }
 
   listMessages(threadId: string): Message[] {
     const rows = this.db
       .query("SELECT * FROM messages WHERE thread_id = $threadId ORDER BY created_at, rowid")
       .all({ threadId }) as MessageRow[];
-    return rows.map(toMessage);
+    const byMessage = new Map<string, Attachment[]>();
+    for (const attachment of this.listAttachmentsForThread(threadId)) {
+      if (!attachment.messageId) continue;
+      const list = byMessage.get(attachment.messageId) ?? [];
+      list.push(publicAttachment(attachment));
+      byMessage.set(attachment.messageId, list);
+    }
+    return rows.map((row) => toMessage(row, byMessage.get(row.id) ?? []));
+  }
+
+  createAttachment(input: {
+    id: string;
+    threadId: string;
+    messageId: string | null;
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+    storagePath: string;
+  }): StoredAttachment {
+    const createdAt = Date.now();
+    this.db
+      .query(
+        `INSERT INTO attachments (id, thread_id, message_id, name, mime_type, size_bytes, storage_path, created_at)
+         VALUES ($id, $threadId, $messageId, $name, $mimeType, $sizeBytes, $storagePath, $createdAt)`,
+      )
+      .run({
+        id: input.id,
+        threadId: input.threadId,
+        messageId: input.messageId,
+        name: input.name,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        storagePath: input.storagePath,
+        createdAt,
+      });
+    return {
+      id: input.id,
+      threadId: input.threadId,
+      messageId: input.messageId,
+      name: input.name,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      url: attachmentUrl(input.id),
+      storagePath: input.storagePath,
+      createdAt,
+    };
+  }
+
+  getAttachment(id: string): StoredAttachment | null {
+    const row = this.db.query("SELECT * FROM attachments WHERE id = $id").get({ id }) as
+      | AttachmentRow
+      | null;
+    return row ? toAttachment(row) : null;
+  }
+
+  bindAttachments(ids: string[], messageId: string): StoredAttachment[] {
+    if (ids.length === 0) return [];
+    const bound: StoredAttachment[] = [];
+    this.db.transaction(() => {
+      const update = this.db.query("UPDATE attachments SET message_id = $messageId WHERE id = $id");
+      for (const id of ids) {
+        update.run({ id, messageId });
+        const item = this.getAttachment(id);
+        if (item) bound.push(item);
+      }
+    })();
+    return bound;
+  }
+
+  listAttachmentsForMessage(messageId: string): StoredAttachment[] {
+    const rows = this.db
+      .query("SELECT * FROM attachments WHERE message_id = $messageId ORDER BY created_at, rowid")
+      .all({ messageId }) as AttachmentRow[];
+    return rows.map(toAttachment);
+  }
+
+  listAttachmentsForThread(threadId: string): StoredAttachment[] {
+    const rows = this.db
+      .query("SELECT * FROM attachments WHERE thread_id = $threadId AND message_id IS NOT NULL ORDER BY created_at, rowid")
+      .all({ threadId }) as AttachmentRow[];
+    return rows.map(toAttachment);
   }
 
   getPreferences(personId = DEFAULT_PERSON_ID): UserPreferences {
@@ -450,6 +581,8 @@ function toThread(row: ThreadRow): StoredThread {
     model: row.model,
     effort: row.effort,
     fast: row.fast === 1,
+    source: row.source === "schedule" ? "schedule" : "chat",
+    settledAt: row.settled_at,
     sessionId: row.session_id,
     status: row.status,
     createdAt: row.created_at,
@@ -457,13 +590,14 @@ function toThread(row: ThreadRow): StoredThread {
   };
 }
 
-function toMessage(row: MessageRow): Message {
+function toMessage(row: MessageRow, attachments: Attachment[]): Message {
   const message: Message = {
     id: row.id,
     threadId: row.thread_id,
     role: row.role,
     text: row.text,
     activities: JSON.parse(row.activities) as Activity[],
+    attachments,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -476,8 +610,32 @@ function toMessage(row: MessageRow): Message {
   return message;
 }
 
+function attachmentUrl(id: string): string {
+  return `/api/attachments/${encodeURIComponent(id)}`;
+}
+
+function toAttachment(row: AttachmentRow): StoredAttachment {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    messageId: row.message_id,
+    name: row.name,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    url: attachmentUrl(row.id),
+    storagePath: row.storage_path,
+    createdAt: row.created_at,
+  };
+}
+
 /** The public view of a thread, without harness-internal fields. */
 export function publicThread(thread: StoredThread): ThreadSummary {
   const { sessionId: _sessionId, ...summary } = thread;
   return summary;
+}
+
+/** The public view of an attachment, without its path on disk. */
+export function publicAttachment(attachment: StoredAttachment): Attachment {
+  const { storagePath: _storagePath, ...pub } = attachment;
+  return pub;
 }

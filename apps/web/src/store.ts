@@ -402,7 +402,8 @@ async function loadAgents(): Promise<void> {
 
 // Actions
 
-export async function sendMessage(text: string): Promise<void> {
+export async function sendMessage(text: string, files: File[] = []): Promise<void> {
+  if (!text.trim() && files.length === 0) return;
   try {
     let id = state.threadId;
     if (!id) {
@@ -415,8 +416,32 @@ export async function sendMessage(text: string): Promise<void> {
       history.pushState(null, "", `/t/${encodeURIComponent(id)}`);
       set({ threadId: id });
     }
-    await api.sendMessage(id, text);
+    const attachmentIds: string[] = [];
+    for (const file of files) {
+      const uploaded = await api.uploadAttachment(id, file, file.name);
+      attachmentIds.push(uploaded.id);
+    }
+    await api.sendMessage(id, text, attachmentIds);
   } catch (error) {
+    report(error);
+  }
+}
+
+export async function settleThread(id: string, settled: boolean): Promise<void> {
+  const previous = state.threads;
+  const optimisticAt = settled ? Date.now() : null;
+  set({
+    threads: previous.map((thread) =>
+      thread.id === id ? { ...thread, settledAt: settled ? (thread.settledAt ?? optimisticAt) : null } : thread,
+    ),
+  });
+  try {
+    const updated = await api.updateThread(id, { settled });
+    set((current) => ({
+      threads: sortThreads([updated, ...current.threads.filter((thread) => thread.id !== updated.id)]),
+    }));
+  } catch (error) {
+    set({ threads: previous });
     report(error);
   }
 }
@@ -527,6 +552,14 @@ function apply(event: StreamEvent): void {
           ...message,
           activities: upsertActivity(message.activities, event.activity),
         })),
+      }));
+      return;
+    case "message.attachment":
+      set((current) => ({
+        messages: updateMessage(current.messages, event.threadId, event.messageId, (message) => {
+          if (message.attachments.some((item) => item.id === event.attachment.id)) return message;
+          return { ...message, attachments: [...message.attachments, event.attachment] };
+        }),
       }));
       return;
     case "agents.changed":

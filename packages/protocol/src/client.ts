@@ -4,6 +4,7 @@ import type {
   AgentInput,
   AgentSummary,
   ApiErrorBody,
+  Attachment,
   CreateThreadRequest,
   HealthInfo,
   LoginStart,
@@ -95,8 +96,37 @@ export class StafClient {
     return this.request("DELETE", `/api/threads/${encodeURIComponent(id)}`);
   }
 
-  sendMessage(threadId: string, text: string): Promise<SendMessageResponse> {
-    return this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/messages`, { text });
+  sendMessage(threadId: string, text: string, attachmentIds?: string[]): Promise<SendMessageResponse> {
+    return this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/messages`, {
+      text,
+      ...(attachmentIds?.length ? { attachmentIds } : {}),
+    });
+  }
+
+  /**
+   * Uploads a file to a thread (pending for the next message) or directly onto an existing message.
+   */
+  async uploadAttachment(
+    threadId: string,
+    file: Blob,
+    name: string,
+    messageId?: string,
+  ): Promise<Attachment> {
+    const form = new FormData();
+    form.append("file", file, name);
+    const path = messageId
+      ? `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/attachments`
+      : `/api/threads/${encodeURIComponent(threadId)}/attachments`;
+    const res = await this.fetchImpl(this.baseUrl + path, {
+      method: "POST",
+      headers: { "x-staf-client": "1" },
+      body: form,
+    });
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as ApiErrorBody | null;
+      throw new StafApiError(res.status, payload?.error ?? `Request failed (${res.status}).`);
+    }
+    return (await res.json()) as Attachment;
   }
 
   interrupt(threadId: string): Promise<void> {

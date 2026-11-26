@@ -2,13 +2,17 @@ import type { Message } from "@staf/protocol";
 import { memo, useMemo } from "react";
 import { renderMarkdown } from "../markdown.ts";
 import { Activities } from "./Activities.tsx";
+import { Attachments } from "./Attachments.tsx";
 import { Icon } from "./Icon.tsx";
 
 export const MessageView = memo(function MessageView({ message }: { message: Message }) {
   if (message.role === "user") {
     return (
       <div className="message user">
-        <div className="bubble">{message.text}</div>
+        <div className="user-content">
+          {message.attachments.length > 0 && <Attachments attachments={message.attachments} align="right" />}
+          {message.text && <div className="bubble">{message.text}</div>}
+        </div>
       </div>
     );
   }
@@ -33,6 +37,7 @@ function AssistantMessage({ message }: { message: Message }) {
       {message.text && (
         <div className={`prose${streaming ? " streaming" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />
       )}
+      {message.attachments.length > 0 && <Attachments attachments={message.attachments} />}
       {message.status === "failed" && (
         <div className="notice error">
           <Icon name="alert" size={16} />

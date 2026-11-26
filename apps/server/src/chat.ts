@@ -1,8 +1,27 @@
-import type { Activity, Message, SendMessageResponse, ThreadSummary, UpdateThreadRequest } from "@staf/protocol";
+import { existsSync } from "node:fs";
+import type {
+  Activity,
+  Attachment,
+  Message,
+  SendMessageResponse,
+  ThreadSource,
+  ThreadSummary,
+  UpdateThreadRequest,
+} from "@staf/protocol";
 import { type Agent, AgentConfigError, type AgentAccess, chatInstructions, DEFAULT_AGENT_ID, type Agents } from "./agents.ts";
+import {
+  copyAttachmentToWorkspace,
+  deleteThreadAttachmentFiles,
+  formatBytes,
+  MAX_ATTACHMENT_BYTES,
+  normalizeMimeType,
+  resolveAttachmentPath,
+  sanitizeFilename,
+  writeAttachmentFile,
+} from "./attachments.ts";
 import type { EventBus } from "./bus.ts";
 import type { HarnessAdapter, HarnessEvent, TurnOutcome } from "./harness/types.ts";
-import { publicThread, type Store } from "./store.ts";
+import { publicAttachment, publicThread, type Store } from "./store.ts";
 
 export class ChatError extends Error {
   constructor(
@@ -30,6 +49,7 @@ export class ChatService {
     private readonly agents: Agents,
     private readonly harnesses: Map<string, HarnessAdapter>,
     private readonly bus: EventBus,
+    private readonly attachmentsDir: string,
     /** Overrides the harness that agents ask for, such as "fake" for offline work. */
     private readonly harnessOverride: string | null = null,
   ) {}
@@ -40,7 +60,7 @@ export class ChatService {
 
   createThread(
     agentId = DEFAULT_AGENT_ID,
-    choice: { harness?: string; model?: string | null; effort?: string | null; fast?: boolean } = {},
+    choice: { harness?: string; model?: string | null; effort?: string | null; fast?: boolean; source?: ThreadSource } = {},
   ): ThreadSummary {
     const agent = this.loadAgent(agentId);
     if (!agent) throw new ChatError(404, `There is no agent named "${agentId}".`);
@@ -55,6 +75,7 @@ export class ChatService {
       model: choice.model !== undefined ? choice.model : other ? null : agent.model,
       effort: choice.effort !== undefined ? choice.effort : other ? null : agent.effort,
       fast: choice.fast ?? (other ? false : agent.fast),
+      source: choice.source ?? "chat",
     });
     const summary = publicThread(thread);
     this.bus.publish({ type: "thread.upserted", thread: summary });
@@ -72,22 +93,32 @@ export class ChatService {
   }
 
   /**
-   * Changes the harness, model, reasoning level, or fast mode of a conversation from the next
-   * message on. A new harness starts a new session, which receives the earlier conversation
-   * with the next message.
+   * Changes the harness, model, reasoning level, or fast mode of a thread from the next
+   * message on, or updates its settled state. A new harness starts a new session, which
+   * receives the earlier conversation with the next message.
    */
   updateThread(id: string, change: UpdateThreadRequest): ThreadSummary {
     const thread = this.store.getThread(id);
     if (!thread) throw new ChatError(404, "That conversation does not exist.");
-    if (this.running.has(id)) throw new ChatError(409, "Wait for the current answer to finish, or stop it first.");
+    const changingModel =
+      change.harness !== undefined ||
+      change.model !== undefined ||
+      change.effort !== undefined ||
+      change.fast !== undefined;
+    if (changingModel && this.running.has(id)) {
+      throw new ChatError(409, "Wait for the current answer to finish, or stop it first.");
+    }
     const harness = change.harness ?? thread.harness;
     if (change.harness !== undefined) this.checkHarness(harness, null);
     const switching = harness !== thread.harness;
+    const settledAt =
+      change.settled === undefined ? undefined : change.settled ? (thread.settledAt ?? Date.now()) : null;
     const updated = this.store.updateThread(id, {
       harness,
       model: change.model !== undefined ? change.model : switching ? null : thread.model,
       effort: change.effort !== undefined ? change.effort : switching ? null : thread.effort,
       fast: change.fast ?? (switching ? false : thread.fast),
+      ...(settledAt !== undefined ? { settledAt } : {}),
       ...(switching ? { sessionId: null } : {}),
     })!;
     const summary = publicThread(updated);
@@ -95,7 +126,7 @@ export class ChatService {
     return summary;
   }
 
-  /** Deletes a conversation, and the copies that its harnesses keep. */
+  /** Deletes a thread, its attachment files, and the copies that its harnesses keep. */
   async deleteThread(id: string): Promise<void> {
     const run = this.running.get(id);
     if (run) {
@@ -118,7 +149,66 @@ export class ChatService {
       }
     }
     this.store.deleteThread(id);
+    deleteThreadAttachmentFiles(this.attachmentsDir, id);
     this.bus.publish({ type: "thread.deleted", threadId: id });
+  }
+
+  /** Uploads a pending file to a thread before the next message sends. */
+  uploadAttachment(
+    threadId: string,
+    input: { name: string; mimeType?: string | null; bytes: Uint8Array },
+  ): Attachment {
+    if (!this.store.getThread(threadId)) throw new ChatError(404, "That conversation does not exist.");
+    return this.saveAttachment(threadId, null, input);
+  }
+
+  /** Attaches a file directly to an existing message (such as a run's generated PDF) and notifies clients. */
+  attachToMessage(
+    threadId: string,
+    messageId: string,
+    input: { name: string; mimeType?: string | null; bytes: Uint8Array },
+  ): Attachment {
+    const message = this.store.getMessage(messageId);
+    if (!message || message.threadId !== threadId) {
+      throw new ChatError(404, "That message does not exist in this thread.");
+    }
+    const attachment = this.saveAttachment(threadId, messageId, input);
+    this.bus.publish({ type: "message.attachment", threadId, messageId, attachment });
+    return attachment;
+  }
+
+  /** Looks up an attachment's metadata and path on disk for serving. */
+  getAttachmentFile(id: string): { attachment: Attachment; fullPath: string } {
+    const stored = this.store.getAttachment(id);
+    if (!stored) throw new ChatError(404, "That attachment does not exist.");
+    const fullPath = resolveAttachmentPath(this.attachmentsDir, stored.storagePath);
+    if (!existsSync(fullPath)) throw new ChatError(404, "That attachment file is missing from disk.");
+    return { attachment: publicAttachment(stored), fullPath };
+  }
+
+  private saveAttachment(
+    threadId: string,
+    messageId: string | null,
+    input: { name: string; mimeType?: string | null; bytes: Uint8Array },
+  ): Attachment {
+    if (input.bytes.byteLength === 0) throw new ChatError(400, "The file is empty.");
+    if (input.bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+      throw new ChatError(413, "Attachments must be 25 MB or smaller.");
+    }
+    const id = crypto.randomUUID();
+    const name = sanitizeFilename(input.name);
+    const mimeType = normalizeMimeType(input.mimeType, name);
+    const storagePath = writeAttachmentFile(this.attachmentsDir, threadId, id, name, input.bytes);
+    const stored = this.store.createAttachment({
+      id,
+      threadId,
+      messageId,
+      name,
+      mimeType,
+      sizeBytes: input.bytes.byteLength,
+      storagePath,
+    });
+    return publicAttachment(stored);
   }
 
   /** Deletes every conversation of an agent, as `deleteThread` does. */
@@ -139,9 +229,10 @@ export class ChatService {
     this.running.get(id)?.controller.abort();
   }
 
-  send(threadId: string, rawText: string): SendMessageResponse {
+  send(threadId: string, rawText: string, rawAttachmentIds: string[] = []): SendMessageResponse {
     const text = rawText.trim();
-    if (!text) throw new ChatError(400, "The message is empty.");
+    const attachmentIds = [...new Set(rawAttachmentIds)];
+    if (!text && attachmentIds.length === 0) throw new ChatError(400, "The message is empty.");
     const thread = this.store.getThread(threadId);
     if (!thread) throw new ChatError(404, "That conversation does not exist.");
     if (this.running.has(threadId)) {
@@ -150,12 +241,42 @@ export class ChatService {
     const agent = this.loadAgent(thread.agentId);
     if (!agent) throw new ChatError(409, `The agent "${thread.agentId}" no longer exists.`);
 
+    const pendingAttachments = attachmentIds.map((id) => {
+      const item = this.store.getAttachment(id);
+      if (!item || item.threadId !== threadId) {
+        throw new ChatError(404, `Attachment "${id}" was not found in this thread.`);
+      }
+      if (item.messageId !== null) {
+        throw new ChatError(409, `Attachment "${item.name}" is already attached to a message.`);
+      }
+      return item;
+    });
+
     const earlier = this.store.listMessages(threadId);
     const isFirst = earlier.length === 0;
-    // A thread without a session but with earlier messages has moved to another harness.
-    const withHistory = isFirst ? undefined : handoffInput(earlier, text);
-    const input = !thread.sessionId && withHistory ? withHistory : text;
     const userMessage = this.store.addMessage({ threadId, role: "user", text, status: "complete" });
+    const bound = this.store.bindAttachments(attachmentIds, userMessage.id);
+    if (bound.length > 0) userMessage.attachments = bound.map(publicAttachment);
+
+    let promptText = text;
+    if (bound.length > 0) {
+      const workspacePaths = bound.map((item) => {
+        const rel = copyAttachmentToWorkspace(
+          this.attachmentsDir,
+          item.storagePath,
+          item.id,
+          item.name,
+          agent.workspace,
+        );
+        return `${rel} (${item.mimeType}, ${formatBytes(item.sizeBytes)})`;
+      });
+      const note = `[Staf: the person attached ${bound.length === 1 ? "this file" : "these files"}, saved in your workspace: ${workspacePaths.join(", ")}]`;
+      promptText = promptText ? `${note}\n\n${promptText}` : note;
+    }
+
+    // A thread without a session but with earlier messages has moved to another harness.
+    const withHistory = isFirst ? undefined : handoffInput(earlier, promptText);
+    const input = !thread.sessionId && withHistory ? withHistory : promptText;
     const assistantMessage = this.store.addMessage({
       threadId,
       role: "assistant",
@@ -166,8 +287,9 @@ export class ChatService {
     });
     const updated = this.store.updateThread(threadId, {
       status: "running",
+      settledAt: null,
       touch: true,
-      ...(isFirst ? { title: titleFrom(text) } : {}),
+      ...(isFirst ? { title: titleFrom(text || pendingAttachments[0]!.name) } : {}),
     })!;
     this.bus.publish({ type: "message.created", message: userMessage });
     this.bus.publish({ type: "message.created", message: assistantMessage });
