@@ -1,14 +1,21 @@
 import { Database } from "bun:sqlite";
-import type {
-  Activity,
-  Message,
-  MessageRole,
-  MessageStatus,
-  ThreadStatus,
-  ThreadSummary,
+import {
+  DEFAULT_PREFERENCES,
+  isHeroFont,
+  isSidebarMode,
+  isThemePreference,
+  type Activity,
+  type Message,
+  type MessageRole,
+  type MessageStatus,
+  type ThreadStatus,
+  type ThreadSummary,
+  type UpdatePreferencesRequest,
+  type UserPreferences,
 } from "@staf/protocol";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
+const DEFAULT_PERSON_ID = "default";
 
 interface ThreadRow {
   id: string;
@@ -80,6 +87,19 @@ export class Store {
     if (version < 1) this.createV1();
     if (version < 2) this.migrateToV2();
     if (version < 3) this.migrateToV3();
+    if (version < 4) this.migrateToV4();
+  }
+
+  private migrateToV4(): void {
+    this.db.transaction(() => {
+      this.db.run(`
+        CREATE TABLE preferences (
+          person_id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`);
+      this.db.run("PRAGMA user_version = 4");
+    })();
   }
 
   private migrateToV3(): void {
@@ -371,6 +391,54 @@ export class Store {
       .all({ threadId }) as MessageRow[];
     return rows.map(toMessage);
   }
+
+  getPreferences(personId = DEFAULT_PERSON_ID): UserPreferences {
+    const row = this.db
+      .query("SELECT data FROM preferences WHERE person_id = $personId")
+      .get({ personId }) as { data: string } | null;
+    if (!row) return { ...DEFAULT_PREFERENCES };
+    try {
+      return normalizePreferences(JSON.parse(row.data));
+    } catch {
+      return { ...DEFAULT_PREFERENCES };
+    }
+  }
+
+  updatePreferences(
+    patch: UpdatePreferencesRequest,
+    personId = DEFAULT_PERSON_ID,
+  ): UserPreferences {
+    const current = this.getPreferences(personId);
+    const next: UserPreferences = {
+      theme: patch.theme ?? current.theme,
+      heroFont: patch.heroFont ?? current.heroFont,
+      sidebarMode: patch.sidebarMode ?? current.sidebarMode,
+    };
+    this.db
+      .query(
+        `INSERT INTO preferences (person_id, data, updated_at)
+         VALUES ($personId, $data, $updatedAt)
+         ON CONFLICT(person_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+      )
+      .run({
+        personId,
+        data: JSON.stringify(next),
+        updatedAt: Date.now(),
+      });
+    return next;
+  }
+}
+
+function normalizePreferences(value: unknown): UserPreferences {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ...DEFAULT_PREFERENCES };
+  }
+  const data = value as Record<string, unknown>;
+  return {
+    theme: isThemePreference(data.theme) ? data.theme : DEFAULT_PREFERENCES.theme,
+    heroFont: isHeroFont(data.heroFont) ? data.heroFont : DEFAULT_PREFERENCES.heroFont,
+    sidebarMode: isSidebarMode(data.sidebarMode) ? data.sidebarMode : DEFAULT_PREFERENCES.sidebarMode,
+  };
 }
 
 function toThread(row: ThreadRow): StoredThread {

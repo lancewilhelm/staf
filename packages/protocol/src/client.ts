@@ -3,16 +3,18 @@
 import type {
   AgentInput,
   AgentSummary,
-  LoginStart,
-  ModelInfo,
-  UpdateThreadRequest,
   ApiErrorBody,
   CreateThreadRequest,
   HealthInfo,
+  LoginStart,
+  ModelInfo,
   SendMessageResponse,
   StreamEvent,
   ThreadDetail,
   ThreadSummary,
+  UpdatePreferencesRequest,
+  UpdateThreadRequest,
+  UserPreferences,
 } from "./types.ts";
 
 export class StafApiError extends Error {
@@ -39,6 +41,14 @@ export class StafClient {
 
   health(): Promise<HealthInfo> {
     return this.request("GET", "/api/health");
+  }
+
+  getPreferences(): Promise<UserPreferences> {
+    return this.request("GET", "/api/preferences");
+  }
+
+  updatePreferences(input: UpdatePreferencesRequest): Promise<UserPreferences> {
+    return this.request("PATCH", "/api/preferences", input);
   }
 
   listAgents(): Promise<AgentSummary[]> {

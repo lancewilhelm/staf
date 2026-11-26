@@ -1,4 +1,12 @@
-import type { AgentSummary, HealthInfo, StreamEvent } from "@staf/protocol";
+import {
+  isHeroFont,
+  isSidebarMode,
+  isThemePreference,
+  type AgentSummary,
+  type HealthInfo,
+  type StreamEvent,
+  type UpdatePreferencesRequest,
+} from "@staf/protocol";
 import type { HTMLBundle, Server } from "bun";
 import {
   type Agent,
@@ -14,10 +22,12 @@ import { ChatError, type ChatService } from "./chat.ts";
 import { VERSION } from "./config.ts";
 import { CodexAdapter } from "./harness/codex/adapter.ts";
 import type { HarnessAdapter } from "./harness/types.ts";
+import type { Store } from "./store.ts";
 
 export interface HttpOptions {
   hostname: string;
   port: number;
+  store: Store;
   chat: ChatService;
   agents: Agents;
   bus: EventBus;
@@ -59,6 +69,15 @@ export function startHttp(options: HttpOptions): Server<undefined> {
         );
         const body: HealthInfo = { version: VERSION, harnesses };
         return json(body);
+      }),
+    },
+    "/api/preferences": {
+      GET: api(() => json(options.store.getPreferences())),
+      PATCH: api(async (req) => {
+        const patch = readPreferencesPatch(await readJson(req));
+        const preferences = options.store.updatePreferences(patch);
+        bus.publish({ type: "preferences.changed", preferences });
+        return json(preferences);
       }),
     },
     "/api/agents": {
@@ -302,6 +321,29 @@ function readFast(value: unknown): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "boolean") return value;
   throw new ChatError(400, "Fast mode must be true or false.");
+}
+
+function readPreferencesPatch(body: Record<string, unknown>): UpdatePreferencesRequest {
+  const patch: UpdatePreferencesRequest = {};
+  if (body.theme !== undefined) {
+    if (!isThemePreference(body.theme)) {
+      throw new ChatError(400, 'Theme must be "system", "light", or "dark".');
+    }
+    patch.theme = body.theme;
+  }
+  if (body.heroFont !== undefined) {
+    if (!isHeroFont(body.heroFont)) {
+      throw new ChatError(400, "Unknown heading font.");
+    }
+    patch.heroFont = body.heroFont;
+  }
+  if (body.sidebarMode !== undefined) {
+    if (!isSidebarMode(body.sidebarMode)) {
+      throw new ChatError(400, 'Sidebar mode must be "inbox" or "list".');
+    }
+    patch.sidebarMode = body.sidebarMode;
+  }
+  return patch;
 }
 
 /** Reads an optional model field: a model ID, null for the harness's default, or undefined. */

@@ -235,24 +235,30 @@ Each slice is used live before the next one starts.
        System sans, Fraunces Soft, and System serif).
      - On phones, the agents sit in the same slide-out sidebar above the conversations.
 2. **Scheduled tasks, unified Inbox, and agent settings.**
-   - **Agent settings panel:** Move agent-specific configuration out of global Settings
-     into an agent popup or drawer opened from the sidebar. Keep global Settings focused
-     on Providers, Appearance, and (later) People.
-   - **Scheduled tasks:** Define, pause, edit, and run scheduled tasks per agent inside
-     that agent's panel. Each run creates a thread marked with a schedule icon so that a
-     person can inspect it and reply to it directly. Scheduled tasks run on Codex or
-     Claude; Staf refuses to schedule a task on Antigravity for now (see
-     [decisions.md](decisions.md)).
-   - **Message attachments:** Save and display files produced by a run or chat (for
-     example, a newspaper PDF) right in the thread.
-   - **Unified Inbox and sidebar modes:** Add settle/unsettle state to threads, and let
-     each person choose between **Inbox mode** (unsettled threads and scheduled task runs
-     together until settled) and **Thread list mode** (chronological manual threads plus
-     a separate Inbox section for scheduled runs).
-   - **User-scoped preferences:** Store theme, heading font, and sidebar mode in
-     `staf.db` so that appearance settings sync across every browser and device (using
-     `localStorage` only as a pre-paint cache).
-   - **First live scheduled task:** Port the `morning-intel` skill from Hermes.
+   - 2a: host-synced user preferences and the dedicated agent settings panel. Done.
+     - **User-scoped preferences:** Store theme, heading font, and sidebar mode in
+       `staf.db` (`GET` and `PATCH /api/preferences`, plus `preferences.changed` live
+       events) so that appearance settings sync across every browser and device, using
+       `localStorage` only as a pre-paint cache and migrating older browser-local settings
+       once on first connect.
+     - **Agent settings panel:** Move agent creation, editing, and deletion out of global
+       Settings into a dedicated slide-over panel opened from the sidebar, structured with
+       a section nav (**Profile** now, ready for **Scheduled tasks** and **Memory**). Keep
+       global Settings focused on **Providers**, **Appearance**, and (later) **People**.
+   - 2b: unified Inbox, settle/unsettle state, sidebar modes, and message attachments.
+     - **Unified Inbox and sidebar modes:** Add settle/unsettle state to threads, and let
+       each person choose between **Inbox mode** (unsettled threads and scheduled task runs
+       together until settled) and **Thread list mode** (chronological manual threads plus
+       a separate Inbox section for scheduled runs).
+     - **Message attachments:** Save and display files produced by a run or chat (for
+       example, a newspaper PDF) right in the thread.
+   - 2c: per-agent scheduled tasks and the first live scheduled job.
+     - **Scheduled tasks:** Define, pause, edit, and run scheduled tasks per agent inside
+       that agent's panel. Each run creates a thread marked with a schedule icon so that a
+       person can inspect it and reply to it directly. Scheduled tasks run on Codex or
+       Claude; Staf refuses to schedule a task on Antigravity for now (see
+       [decisions.md](decisions.md)).
+     - **First live scheduled task:** Port the `morning-intel` skill from Hermes.
 3. **The Staf MCP server and memory v1.** Run tokens, the first Staf tools (inbox
    delivery, `memory`, `conversation_search`), and per-agent memory as designed in
    [memory.md](memory.md), with memory blocks and limits in each agent's panel and

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { dismissError, openSettings, startChat, useStore } from "../store.ts";
+import { AgentPanel } from "./AgentPanel.tsx";
 import { ChatView } from "./ChatView.tsx";
 import { Icon } from "./Icon.tsx";
 import { Settings } from "./Settings.tsx";
@@ -9,6 +10,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? null);
   const settings = useStore((s) => s.settings);
+  const agentPanel = useStore((s) => s.agentPanel);
 
   return (
     <div className="app">
@@ -28,6 +30,7 @@ export function App() {
         <ChatView />
       </div>
       {settings && <Settings view={settings} />}
+      {agentPanel && <AgentPanel view={agentPanel} />}
     </div>
   );
 }

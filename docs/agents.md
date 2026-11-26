@@ -134,9 +134,10 @@ A Gemini agent that thinks less, for faster answers:
 
 ## Creating and editing agents
 
-Open **Settings → Agents** in the web app. There you can create an agent, and change an
-agent's name, default provider, model, reasoning level, fast mode, and instructions. Staf names the folder
-after the agent, for example `morning-paper` for "Morning Paper".
+Click `+` next to **Agents** in the left sidebar to create an agent, or click the edit
+button on an agent row to open its agent panel. There you can change an agent's name,
+default provider, model, reasoning level, fast mode, and instructions. Staf names the
+folder after the agent, for example `morning-paper` for "Morning Paper".
 
 **Access settings** (`network`, `writableFolders`, and `harnessApps`) are shown there but
 can only be changed in `agent.json`. Staf's web API has no sign-in yet, so a command that
@@ -161,16 +162,15 @@ be deleted.
 
 ## Picking an agent and choosing a provider or model
 
-The left sidebar lists your agents above the conversations. On phones, open the menu
-button in the top-left corner to reach the same sidebar.
+The left sidebar lists your agents above your threads. On phones, open the menu button in
+the top-left corner to reach the same sidebar.
 
-- **Pick an agent** in the sidebar to start a new chat with it and view its
-  conversations. Click `+` next to Agents to create one, or click the edit icon on an
-  agent to open it in **Settings → Agents**.
-- **Find conversations across agents.** By default, the conversation list shows only the
-  current agent's conversations. Once there is more than one agent, click **All agents**
-  at the top of the list to show conversations from every agent, with each agent's name
-  under the conversation title.
+- **Pick an agent** in the sidebar to start a new chat with it and view its threads. Click
+  `+` next to **Agents** to create one, or click the edit icon on an agent to open its
+  agent panel.
+- **Find threads across agents.** By default, the thread list shows only the current
+  agent's threads. Once there is more than one agent, click **All agents** at the top of
+  the list to show threads from every agent, with each agent's name under the thread title.
 
 The pill under the message box shows the model or provider, and the reasoning level and
 fast mode when they are set, such as "Opus 5.5 · High · Fast". Its menu picks the
@@ -179,8 +179,8 @@ levels and the fast mode that the chosen model offers.
 
 A new chat starts with the provider, model, and level that were last picked for the agent
 in this browser, or with the agent's defaults before anything is picked. Fast mode does
-not carry over, so that a forgotten switch cannot keep costing. Saving the agent in
-Settings resets the choice to the new defaults.
+not carry over, so that a forgotten switch cannot keep costing. Saving the agent in its
+panel resets the choice to the new defaults.
 
 During a conversation:
 
@@ -198,7 +198,7 @@ staf ask --harness claude --model haiku --effort low "Summarize today's weather 
 staf ask --thread <id> --model gpt-6.2-astra "Now in two sentences."
 ```
 
-Model IDs come from each harness, and Settings lists them:
+Model IDs come from each harness, and the agent panel and model menu list them:
 
 - **ChatGPT** lists its models and the levels of each, from `low` to `ultra`.
 - **Claude** lists aliases such as `opus` (the newest Opus) and full model IDs such as

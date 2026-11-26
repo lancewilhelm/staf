@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f7f7f5" />
     <script>
-      // Applies the saved theme and heading font before the page draws. theme.ts keeps them up to date.
+      // Applies the cached theme and heading font before the page draws so it does not flash.
+      // Host preferences sync after the app connects, and theme.ts keeps this cache up to date.
       (function () {
         var setting = null;
         var font = null;

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { activeAgentId, agentInitial, groupThreads, runningAgents, visibleThreads } from "../sidebar.ts";
-import { deleteThread, openSettings, openThread, startChat, useStore } from "../store.ts";
+import { deleteThread, openAgentPanel, openSettings, openThread, startChat, useStore } from "../store.ts";
 import { Icon } from "./Icon.tsx";
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -50,7 +50,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             className="sidebar-action"
             onClick={() => {
               onClose();
-              openSettings({ section: "agents", agentId: "new" });
+              openAgentPanel({ mode: "create" });
             }}
             aria-label="New agent"
             title="New agent"
@@ -82,7 +82,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   title={`Edit ${agent.name}`}
                   onClick={() => {
                     onClose();
-                    openSettings({ section: "agents", agentId: agent.id });
+                    openAgentPanel({ mode: "edit", agentId: agent.id, section: "profile" });
                   }}
                 >
                   <Icon name="edit" size={14} />
@@ -93,9 +93,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </section>
 
-      <nav className="thread-list" aria-label="Conversations">
+      <nav className="thread-list" aria-label="Threads">
         <div className="sidebar-section-head">
-          <h2>Conversations</h2>
+          <h2>Threads</h2>
           {agents.length > 1 && (
             <button
               type="button"
@@ -104,8 +104,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               onClick={() => setShowAll((value) => !value)}
               title={
                 showingAll
-                  ? `Show only ${currentAgent?.name ?? "this agent"}'s conversations`
-                  : "Show conversations from all agents"
+                  ? `Show only ${currentAgent?.name ?? "this agent"}'s threads`
+                  : "Show threads from all agents"
               }
             >
               All agents
@@ -115,8 +115,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {shownThreads.length === 0 ? (
           <p className="thread-empty">
             {!showingAll && currentAgent && agents.length > 1
-              ? `No conversations with ${currentAgent.name} yet.`
-              : "No conversations yet."}
+              ? `No threads with ${currentAgent.name} yet.`
+              : "No threads yet."}
           </p>
         ) : (
           groupThreads(shownThreads).map(([label, items]) => (

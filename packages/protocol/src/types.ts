@@ -179,6 +179,19 @@ export interface SendMessageResponse {
   assistantMessage: Message;
 }
 
+export type ThemePreference = "system" | "light" | "dark";
+export type HeroFont = "bricolage" | "space-grotesk" | "sans" | "fraunces" | "serif";
+export type SidebarMode = "inbox" | "list";
+
+/** Appearance and interface preferences synced per person on the host. */
+export interface UserPreferences {
+  theme: ThemePreference;
+  heroFont: HeroFont;
+  sidebarMode: SidebarMode;
+}
+
+export type UpdatePreferencesRequest = Partial<UserPreferences>;
+
 /** Events that the host streams to clients over server-sent events. */
 export type StreamEvent =
   | { type: "ready" }
@@ -193,7 +206,9 @@ export type StreamEvent =
   /** Agents were added, changed, or removed. */
   | { type: "agents.changed" }
   /** A harness signed in or out. */
-  | { type: "harnesses.changed" };
+  | { type: "harnesses.changed" }
+  /** A person's preferences changed. */
+  | { type: "preferences.changed"; preferences: UserPreferences };
 
 export interface ApiErrorBody {
   error: string;

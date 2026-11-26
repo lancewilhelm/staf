@@ -356,8 +356,51 @@ describe("changing the harness of a conversation", () => {
   });
 });
 
+describe("preferences over HTTP", () => {
+  test("returns defaults, persists partial updates, and streams preferences.changed", async () => {
+    const { client, paths } = start();
+    expect(await client.getPreferences()).toEqual({
+      theme: "system",
+      heroFont: "bricolage",
+      sidebarMode: "list",
+    });
+
+    const events = await collect(
+      client,
+      (event) => event.type === "preferences.changed",
+      () => client.updatePreferences({ theme: "dark", heroFont: "fraunces" }),
+    );
+    expect(events).toContainEqual({
+      type: "preferences.changed",
+      preferences: { theme: "dark", heroFont: "fraunces", sidebarMode: "list" },
+    });
+
+    const updated = await client.updatePreferences({ sidebarMode: "inbox" });
+    expect(updated).toEqual({ theme: "dark", heroFont: "fraunces", sidebarMode: "inbox" });
+
+    // Preferences stay persisted in staf.db across restarts.
+    const reopened = new Store(paths.db);
+    expect(reopened.getPreferences()).toEqual({ theme: "dark", heroFont: "fraunces", sidebarMode: "inbox" });
+    reopened.close();
+  });
+
+  test("validates preferences and requires the Staf client header on PATCH", async () => {
+    const { client, url } = start();
+    await expect(client.updatePreferences({ theme: "sepia" as never })).rejects.toMatchObject({ status: 400 });
+    await expect(client.updatePreferences({ heroFont: "comic-sans" as never })).rejects.toMatchObject({ status: 400 });
+    await expect(client.updatePreferences({ sidebarMode: "grid" as never })).rejects.toMatchObject({ status: 400 });
+
+    const res = await fetch(`${url}/api/preferences`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ theme: "dark" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("Store migration", () => {
-  test("upgrades a version 1 database and records its sessions", () => {
+  test("upgrades a version 1 database, records its sessions, and adds preferences", () => {
     const home = mkdtempSync(join(tmpdir(), "staf-store-"));
     const path = join(home, "staf.db");
     const v1 = new Database(path);
@@ -378,6 +421,27 @@ describe("Store migration", () => {
     const [user, assistant] = store.listMessages("t1");
     expect(user!.harness).toBeUndefined();
     expect(assistant).toMatchObject({ harness: "codex", model: null });
+    expect(store.getPreferences()).toEqual({ theme: "system", heroFont: "bricolage", sidebarMode: "list" });
+    expect(store.updatePreferences({ theme: "light" })).toEqual({
+      theme: "light",
+      heroFont: "bricolage",
+      sidebarMode: "list",
+    });
+    store.close();
+  });
+
+  test("falls back to defaults when stored preference JSON is malformed or has unknown values", () => {
+    const home = mkdtempSync(join(tmpdir(), "staf-store-"));
+    const store = new Store(join(home, "staf.db"));
+    store.db
+      .query("INSERT INTO preferences (person_id, data, updated_at) VALUES ('default', $data, 1)")
+      .run({ data: "{not json" });
+    expect(store.getPreferences()).toEqual({ theme: "system", heroFont: "bricolage", sidebarMode: "list" });
+
+    store.db
+      .query("UPDATE preferences SET data = $data WHERE person_id = 'default'")
+      .run({ data: JSON.stringify({ theme: "dark", heroFont: "unknown", sidebarMode: 42 }) });
+    expect(store.getPreferences()).toEqual({ theme: "dark", heroFont: "bricolage", sidebarMode: "list" });
     store.close();
   });
 });

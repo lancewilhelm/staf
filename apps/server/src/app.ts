@@ -60,6 +60,7 @@ export function createApp(options: AppOptions): App {
   const server = startHttp({
     hostname: options.hostname,
     port: options.port,
+    store,
     chat,
     agents,
     bus,

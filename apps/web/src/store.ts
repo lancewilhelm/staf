@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PREFERENCES,
   type Activity,
   type AgentInput,
   type AgentSummary,
@@ -8,9 +9,18 @@ import {
   StafClient,
   type StreamEvent,
   type ThreadSummary,
+  type UpdatePreferencesRequest,
+  type UserPreferences,
 } from "@staf/protocol";
 import { listenShared } from "./events.ts";
 import { useSyncExternalStore } from "react";
+import {
+  applyPreferences,
+  legacyPreferencesToMigrate,
+  markPreferencesSynced,
+  readCachedPreferences,
+  writeCachedPreferences,
+} from "./theme.ts";
 
 export type Connection = "connecting" | "open" | "offline";
 
@@ -32,7 +42,9 @@ export interface State {
   draft: Partial<Choice>;
   /** Model lists by harness, loaded when someone opens a picker. */
   models: Record<string, ModelList>;
+  preferences: UserPreferences;
   settings: SettingsView | null;
+  agentPanel: AgentPanelView | null;
   connection: Connection;
   /** The last error from an action, shown once to the person. */
   error: string | null;
@@ -49,9 +61,14 @@ export interface Choice {
 export type ModelList = { status: "loading" } | { status: "ready"; list: ModelInfo[] } | { status: "error"; error: string };
 
 export type SettingsView =
-  | { section: "agents"; agentId: string | null }
   | { section: "providers" }
   | { section: "appearance" };
+
+export type AgentPanelSection = "profile";
+
+export type AgentPanelView =
+  | { mode: "create" }
+  | { mode: "edit"; agentId: string; section: AgentPanelSection };
 
 export const api = new StafClient(location.origin);
 
@@ -90,6 +107,8 @@ function rememberChoice(agentId: string, choice: Choice | null): void {
   }
 }
 
+const initialPreferences = readCachedPreferences();
+
 let state: State = {
   threadId: threadFromPath(location.pathname),
   threads: [],
@@ -99,7 +118,13 @@ let state: State = {
   agentId: readSavedAgent(),
   draft: lastChoice(readSavedAgent()),
   models: {},
+  preferences: {
+    ...DEFAULT_PREFERENCES,
+    theme: initialPreferences.theme,
+    heroFont: initialPreferences.heroFont,
+  },
   settings: null,
+  agentPanel: null,
   connection: "connecting",
   error: null,
 };
@@ -276,12 +301,56 @@ export async function choose(change: Partial<Choice>): Promise<void> {
   set({ draft: same ? {} : draft });
 }
 
-export function openSettings(view: SettingsView = { section: "agents", agentId: null }): void {
-  set({ settings: view });
+export function openSettings(view: SettingsView = { section: "providers" }): void {
+  set({ settings: view, agentPanel: null });
 }
 
 export function closeSettings(): void {
   set({ settings: null });
+}
+
+export function openAgentPanel(view: AgentPanelView): void {
+  set({ agentPanel: view, settings: null });
+}
+
+export function closeAgentPanel(): void {
+  set({ agentPanel: null });
+}
+
+let preferencesMigrated = false;
+
+function applyServerPreferences(preferences: UserPreferences): void {
+  set({ preferences });
+  writeCachedPreferences(preferences);
+  applyPreferences(preferences);
+}
+
+async function loadPreferences(): Promise<void> {
+  const server = await api.getPreferences();
+  if (!preferencesMigrated) {
+    preferencesMigrated = true;
+    const patch = legacyPreferencesToMigrate(server, readCachedPreferences());
+    if (patch) {
+      markPreferencesSynced();
+      const migrated = await api.updatePreferences(patch);
+      applyServerPreferences(migrated);
+      return;
+    }
+  }
+  applyServerPreferences(server);
+}
+
+export async function updatePreferences(patch: UpdatePreferencesRequest): Promise<void> {
+  const previous = state.preferences;
+  const optimistic: UserPreferences = { ...previous, ...patch };
+  applyServerPreferences(optimistic);
+  try {
+    const saved = await api.updatePreferences(patch);
+    applyServerPreferences(saved);
+  } catch (error) {
+    applyServerPreferences(previous);
+    report(error);
+  }
 }
 
 export async function saveAgent(id: string | null, input: AgentInput): Promise<AgentSummary | null> {
@@ -321,10 +390,14 @@ export async function signIn(harness: string): Promise<void> {
 
 async function loadAgents(): Promise<void> {
   const agents = await api.listAgents();
-  set((current) => ({
-    agents,
-    agentId: agents.some((agent) => agent.id === current.agentId) ? current.agentId : (agents[0]?.id ?? "default"),
-  }));
+  set((current) => {
+    const panel = current.agentPanel;
+    return {
+      agents,
+      agentId: agents.some((agent) => agent.id === current.agentId) ? current.agentId : (agents[0]?.id ?? "default"),
+      agentPanel: panel?.mode === "edit" && !agents.some((agent) => agent.id === panel.agentId) ? null : panel,
+    };
+  });
 }
 
 // Actions
@@ -466,6 +539,9 @@ function apply(event: StreamEvent): void {
       for (const harness of inUse) void loadModels(harness, { force: true });
       return;
     }
+    case "preferences.changed":
+      applyServerPreferences(event.preferences);
+      return;
     case "message.completed":
       set((current) => ({
         messages: updateMessage(
@@ -484,6 +560,7 @@ function loadEverything(): void {
   void loadThreads().catch(report);
   void loadHealth().catch(() => {});
   void loadAgents().catch(() => {});
+  void loadPreferences().catch(() => {});
   if (state.threadId) void loadThread(state.threadId);
 }
 
