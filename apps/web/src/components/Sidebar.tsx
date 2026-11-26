@@ -144,6 +144,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
           {main.length === 0 ? (
             <p className="thread-empty">{emptyMainText}</p>
+          ) : isInboxMode ? (
+            main.map((thread) => (
+              <ThreadRow
+                key={thread.id}
+                thread={thread}
+                active={thread.id === current}
+                owner={showingAll ? agentNames.get(thread.agentId) : undefined}
+                showSettle
+                now={now}
+                onOpen={go}
+              />
+            ))
           ) : (
             groupThreads(main, now).map(([label, items]) => (
               <section key={label}>
@@ -154,7 +166,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     thread={thread}
                     active={thread.id === current}
                     owner={showingAll ? agentNames.get(thread.agentId) : undefined}
-                    showSettle={isInboxMode}
+                    showSettle={false}
                     now={now}
                     onOpen={go}
                   />
