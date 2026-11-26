@@ -3,6 +3,20 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
+## 2026-11-26: Per-agent Staf tools live in a shared catalog and can be restricted per agent
+
+Built-in Staf MCP tools (`attach_file`, `memory`, `conversation_search`, and
+`scheduled_tasks`) are defined in a shared catalog in `@staf/protocol` with `defaultEnabled`
+flags. New agents receive all default tools automatically, and each agent can override
+individual capabilities in its **Tools** tab (stored only when non-default under `tools` in
+`agent.json`). The Staf MCP server filters both `tools/list` and `tools/call` dynamically
+against the calling agent's enabled tools, and `chatInstructions` omits guidance for any
+disabled tool.
+
+Why: people need to see what built-in tools an agent has and restrict specific tools (such
+as scheduled task management or memory) for narrower agents, while keeping one uniform
+catalog ready for opt-in plugins such as Gmail in slice 4.
+
 ## 2026-11-26: Memory snapshots freeze per thread, and scheduled runs can only propose changes
 
 Staf copies an agent's active `profile` and `notes` memory blocks into `threads.memory_snapshot`

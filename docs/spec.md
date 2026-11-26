@@ -153,9 +153,9 @@ the same way whichever harness made the call.
   them. The raw usage payload from each harness is kept only in the database for later
   analysis. Clients receive the normalized stats on each message, but the web app does not
   show them yet. Per-provider usage views come in a later slice.
-- **Agent panel** (slice 2): Each agent's own settings (profile, instructions, defaults,
-  access summary, and scheduled tasks — and later memory and integrations) open in an
-  agent-specific popup or drawer from the sidebar rather than crowding global Settings.
+- **Agent panel** (slice 2–3): Each agent's own settings (Profile, Scheduled tasks,
+  Memory, and Tools — and later integrations such as Gmail) open in an agent-specific
+  slide-over drawer from the sidebar rather than crowding global Settings.
 - **Synced preferences** (slice 2): Appearance and sidebar preferences (theme, heading
   font, and Inbox vs. Thread list mode) are stored on the host per person and synced
   across all devices and sessions.

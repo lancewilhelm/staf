@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, resolve, sep } from "node:path";
 import {
   formatScheduleSummary,
+  isMcpToolEnabled,
   isMemoryBlock,
   type CreateScheduledTaskRequest,
   type MemoryBlock,
@@ -309,8 +310,13 @@ export class McpServer {
       }
       case "ping":
         return rpcResult(id, {});
-      case "tools/list":
-        return rpcResult(id, { tools: STAF_TOOLS });
+      case "tools/list": {
+        const agent = this.deps.agents.get(binding.agentId);
+        const tools = agent
+          ? STAF_TOOLS.filter((tool) => isMcpToolEnabled(tool.name, agent.tools))
+          : [];
+        return rpcResult(id, { tools });
+      }
       case "tools/call": {
         const run = this.deps.tokens.verifyActiveRun(token);
         if (!run) {
@@ -335,6 +341,12 @@ export class McpServer {
         : {};
 
     try {
+      const known = STAF_TOOLS.some((tool) => tool.name === name);
+      if (!known) return rpcError(id, -32602, `Unknown tool: ${name}`);
+      const agent = this.deps.agents.get(run.agentId);
+      if (!agent || !isMcpToolEnabled(name, agent.tools)) {
+        return rpcResult(id, toolFailure(`The tool "${name}" is disabled for this agent.`));
+      }
       switch (name) {
         case "attach_file":
           return rpcResult(id, toolSuccess(this.attachFile(run, args)));

@@ -1,6 +1,8 @@
 // Types shared by the Staf host, the web app, and the CLI.
 // Keep this file free of Bun, Node, and DOM-specific imports.
 
+import type { StafToolId } from "./tools.ts";
+
 export type ThreadStatus = "idle" | "running";
 
 /** How a thread started: a person's chat or a scheduled task run. */
@@ -220,6 +222,8 @@ export interface AgentSummary {
   instructions: string;
   /** Memory block limits and reminder interval for this agent. */
   memory: AgentMemorySettings;
+  /** Resolved map of which built-in Staf MCP tools are enabled for this agent. */
+  tools: Record<StafToolId, boolean>;
   /** Access settings. They are edited in agent.json, not through the API. */
   network: boolean;
   writableFolders: string[];
@@ -237,6 +241,7 @@ export interface AgentInput {
   fast: boolean;
   instructions: string;
   memory?: Partial<AgentMemorySettings>;
+  tools?: Partial<Record<StafToolId, boolean>>;
 }
 
 export interface HarnessInfo {

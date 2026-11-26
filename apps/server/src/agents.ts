@@ -3,10 +3,14 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
   DEFAULT_MEMORY_SETTINGS,
+  isStafToolId,
   MAX_MEMORY_LIMIT,
   MAX_NUDGE_INTERVAL,
   MIN_MEMORY_LIMIT,
+  resolveEnabledTools,
+  STAF_TOOL_CATALOG,
   type AgentMemorySettings,
+  type StafToolId,
 } from "@staf/protocol";
 
 export const DEFAULT_AGENT_ID = "default";
@@ -33,6 +37,8 @@ export interface AgentSettings {
   writableFolders: string[];
   /** Per-agent memory limits and reminder interval. */
   memory: AgentMemorySettings;
+  /** Per-agent overrides for built-in Staf MCP tools (omitted entries use Staf's default). */
+  tools: Partial<Record<StafToolId, boolean>>;
 }
 
 /** What an agent may reach while it runs. Adapters turn this into harness settings. */
@@ -51,6 +57,8 @@ export interface Agent {
   effort: string | null;
   fast: boolean;
   memory: AgentMemorySettings;
+  /** Resolved map of which built-in Staf MCP tools are enabled for this agent. */
+  tools: Record<StafToolId, boolean>;
   access: AgentAccess;
   /** The agent's folder, which holds its settings and instructions. The agent cannot write here. */
   dir: string;
@@ -84,6 +92,7 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   harnessApps: [],
   writableFolders: [],
   memory: { ...DEFAULT_MEMORY_SETTINGS },
+  tools: {},
 };
 
 const DEFAULT_INSTRUCTIONS = `# Staf
@@ -108,6 +117,7 @@ export interface AgentEdit {
   fast?: boolean;
   instructions?: string;
   memory?: Partial<AgentMemorySettings>;
+  tools?: Partial<Record<StafToolId, boolean>>;
 }
 
 export class Agents {
@@ -185,6 +195,7 @@ export class Agents {
       effort: settings.effort,
       fast: settings.fast,
       memory: settings.memory,
+      tools: resolveEnabledTools(settings.tools),
       access: {
         network: settings.network,
         harnessApps: settings.harnessApps,
@@ -197,7 +208,12 @@ export class Agents {
   }
 
   /** Creates an agent folder with default access settings, and returns the new agent. */
-  create(input: Omit<Required<AgentEdit>, "memory"> & { memory?: Partial<AgentMemorySettings> }): Agent {
+  create(
+    input: Omit<Required<AgentEdit>, "memory" | "tools"> & {
+      memory?: Partial<AgentMemorySettings>;
+      tools?: Partial<Record<StafToolId, boolean>>;
+    },
+  ): Agent {
     const name = checkName(input.name);
     checkInstructions(input.instructions);
     const base = slug(name);
@@ -206,6 +222,7 @@ export class Agents {
     const dir = join(this.root, id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const memory = normalizeMemoryEdit(DEFAULT_MEMORY_SETTINGS, input.memory);
+    const tools = normalizeToolsEdit({}, input.tools);
     const settings: AgentSettings = {
       ...DEFAULT_SETTINGS,
       name,
@@ -214,6 +231,7 @@ export class Agents {
       effort: input.effort,
       fast: input.fast,
       memory,
+      tools,
     };
     writeFileSync(join(dir, "agent.json"), JSON.stringify(settings, null, 2) + "\n");
     writeFileSync(join(dir, "AGENTS.md"), input.instructions);
@@ -221,7 +239,7 @@ export class Agents {
   }
 
   /**
-   * Changes an agent's name, harness, model, reasoning level, fast mode, instructions, or memory limits.
+   * Changes an agent's name, harness, model, reasoning level, fast mode, instructions, memory limits, or tool toggles.
    * Other fields in agent.json, including ones that Staf does not know, are kept as they are.
    */
   update(id: string, edit: AgentEdit): Agent {
@@ -236,6 +254,11 @@ export class Agents {
     if (edit.fast !== undefined) raw.fast = edit.fast;
     if (edit.memory !== undefined) {
       raw.memory = normalizeMemoryEdit(current.memory, edit.memory);
+    }
+    if (edit.tools !== undefined) {
+      const merged = normalizeToolsEdit(current.tools, edit.tools);
+      if (Object.keys(merged).length > 0) raw.tools = merged;
+      else delete raw.tools;
     }
     parseSettings(id, raw);
     writeFileSync(settingsPath, JSON.stringify(raw, null, 2) + "\n");
@@ -339,7 +362,41 @@ function parseSettings(id: string, raw: unknown): AgentSettings {
     harnessApps: field("harnessApps", isStringList, "a list of app names or IDs"),
     writableFolders: field("writableFolders", isStringList, "a list of folder paths"),
     memory: parseMemorySettings(id, value.memory),
+    tools: parseToolsSettings(id, value.tools),
   };
+}
+
+function parseToolsSettings(id: string, raw: unknown): Partial<Record<StafToolId, boolean>> {
+  if (raw === undefined) return {};
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new AgentConfigError(id, '"tools" must be a JSON object mapping tool IDs to true or false.');
+  }
+  const overrides: Partial<Record<StafToolId, boolean>> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isStafToolId(key)) {
+      throw new AgentConfigError(id, `unknown tool "${key}" in "tools".`);
+    }
+    if (typeof val !== "boolean") {
+      throw new AgentConfigError(id, `"tools.${key}" must be true or false.`);
+    }
+    overrides[key] = val;
+  }
+  return overrides;
+}
+
+function normalizeToolsEdit(
+  base: Partial<Record<StafToolId, boolean>>,
+  patch?: Partial<Record<StafToolId, boolean>>,
+): Partial<Record<StafToolId, boolean>> {
+  const resolved = resolveEnabledTools({ ...base, ...(patch ?? {}) });
+  // Store only non-default overrides in agent.json so default agents stay clean.
+  const overrides: Partial<Record<StafToolId, boolean>> = {};
+  for (const tool of STAF_TOOL_CATALOG) {
+    if (resolved[tool.id] !== tool.defaultEnabled) {
+      overrides[tool.id] = resolved[tool.id];
+    }
+  }
+  return overrides;
 }
 
 function parseMemorySettings(id: string, raw: unknown): AgentMemorySettings {
@@ -411,7 +468,7 @@ function normalizeMemoryEdit(
  * the conversation's frozen memory snapshot (when present).
  */
 export function chatInstructions(
-  agent: Pick<Agent, "instructions">,
+  agent: Pick<Agent, "instructions"> & { tools?: Partial<Record<StafToolId, boolean>> },
   now = new Date(),
   memoryBlock = "",
 ): string {
@@ -421,14 +478,31 @@ export function chatInstructions(
     timeStyle: "short",
     timeZone: zone,
   });
+  const enabledTools = resolveEnabledTools(agent.tools);
   const parts = [
     "You are running inside Staf, a personal assistant for a household. You are not working on a software project unless the person asks for one.",
     "The person reads your answer in a chat app that renders Markdown. Lead with the answer. Keep it short unless they ask for depth. Use links for sources.",
-    "When you create a file that the person should view or download (such as a PDF, chart, or report), use Staf's attach_file tool to attach it directly to your reply.",
-    "Use Staf's memory tool to remember durable preferences, routines, people, places (profile) or operational notes (notes) across conversations, and conversation_search to look up earlier chats.",
+  ];
+  if (enabledTools.attach_file) {
+    parts.push(
+      "When you create a file that the person should view or download (such as a PDF, chart, or report), use Staf's attach_file tool to attach it directly to your reply.",
+    );
+  }
+  if (enabledTools.memory && enabledTools.conversation_search) {
+    parts.push(
+      "Use Staf's memory tool to remember durable preferences, routines, people, places (profile) or operational notes (notes) across conversations, and conversation_search to look up earlier chats.",
+    );
+  } else if (enabledTools.memory) {
+    parts.push(
+      "Use Staf's memory tool to remember durable preferences, routines, people, places (profile) or operational notes (notes) across conversations.",
+    );
+  } else if (enabledTools.conversation_search) {
+    parts.push("Use Staf's conversation_search tool to look up earlier chats when needed.");
+  }
+  parts.push(
     "Do not describe your tools or your working folder unless the person asks.",
     `The conversation started on ${date} (${zone}).`,
-  ];
+  );
   const own = agent.instructions.trim();
   if (own) parts.push(`The agent's own instructions follow.\n\n${own}`);
   const mem = memoryBlock.trim();

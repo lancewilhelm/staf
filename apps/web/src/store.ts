@@ -13,6 +13,7 @@ import {
   type Message,
   type ModelInfo,
   type ScheduledTask,
+  type StafToolId,
   StafClient,
   type StreamEvent,
   type ThreadSummary,
@@ -77,7 +78,7 @@ export type SettingsView =
   | { section: "providers" }
   | { section: "appearance" };
 
-export type AgentPanelSection = "profile" | "tasks" | "memory";
+export type AgentPanelSection = "profile" | "tasks" | "memory" | "tools";
 
 export type AgentPanelView =
   | { mode: "create" }
@@ -548,6 +549,20 @@ export async function saveAgentMemorySettings(
   try {
     await api.updateAgent(agentId, { memory });
     await Promise.all([loadAgents(), loadAgentMemory(agentId)]);
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
+export async function saveAgentTools(
+  agentId: string,
+  tools: Partial<Record<StafToolId, boolean>>,
+): Promise<boolean> {
+  try {
+    await api.updateAgent(agentId, { tools });
+    await loadAgents();
     return true;
   } catch (error) {
     report(error);

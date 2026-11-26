@@ -328,6 +328,69 @@ describe("Staf MCP bridge and attach_file end-to-end", () => {
     expect(download.status).toBe(200);
     expect(await download.text()).toBe("%PDF-1.4\nhello");
   });
+
+  test("filters tools/list and blocks tools/call when an agent restricts Staf tools", async () => {
+    const harness = new GateHarness("codex", "ChatGPT");
+    const { app, client } = startWith([harness]);
+
+    // Create an agent with scheduled_tasks and memory disabled.
+    const locked = await client.createAgent({
+      name: "Locked",
+      harness: "codex",
+      model: null,
+      effort: null,
+      fast: false,
+      instructions: "",
+      tools: { scheduled_tasks: false, memory: false },
+    });
+    expect(locked.tools).toEqual({
+      attach_file: true,
+      memory: false,
+      conversation_search: true,
+      scheduled_tasks: false,
+    });
+
+    // Reject unknown tool IDs.
+    await expect(
+      client.updateAgent(locked.id, { tools: { bogus: false } as any }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const thread = await client.createThread({ agentId: locked.id });
+    const started = harness.nextTurn();
+    await client.sendMessage(thread.id, "Check my tools");
+    const req = await started;
+    // Instructions omit disabled tools.
+    expect(req.instructions).not.toContain("memory tool");
+    expect(req.instructions).toContain("attach_file");
+    expect(req.instructions).toContain("conversation_search");
+
+    const bridge = new BridgeClient(req.mcp!);
+    try {
+      const listed = await bridge.request("tools/list");
+      expect(listed.result.tools.map((t: { name: string }) => t.name)).toEqual([
+        "attach_file",
+        "conversation_search",
+      ]);
+
+      // Calling a disabled tool returns a clear error instead of executing.
+      const blocked = await bridge.callTool("list_scheduled_tasks");
+      expect(blocked.isError).toBe(true);
+      expect(blocked.text).toContain("disabled for this agent");
+
+      const blockedMem = await bridge.callTool("memory", { action: "list" });
+      expect(blockedMem.isError).toBe(true);
+      expect(blockedMem.text).toContain("disabled for this agent");
+
+      // Re-enabling a tool takes effect immediately.
+      await client.updateAgent(locked.id, { tools: { scheduled_tasks: true } });
+      const allowed = await bridge.callTool("list_scheduled_tasks");
+      expect(allowed.isError).toBe(false);
+    } finally {
+      harness.release();
+      await bridge.close();
+      await app.chat.idle();
+    }
+  });
 });
 
 describe("MCP scheduled task tools", () => {

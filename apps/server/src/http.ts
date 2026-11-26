@@ -2,6 +2,7 @@ import {
   isHeroFont,
   isMemoryBlock,
   isSidebarMode,
+  isStafToolId,
   isThemePreference,
   type AgentMemorySettings,
   type AgentSummary,
@@ -9,6 +10,7 @@ import {
   type CreateMemoryRequest,
   type CreateScheduledTaskRequest,
   type HealthInfo,
+  type StafToolId,
   type StreamEvent,
   type ThreadSource,
   type UpdateMemoryRequest,
@@ -111,6 +113,7 @@ export function startHttp(options: HttpOptions): Server<undefined> {
           fast: edit.fast ?? false,
           instructions: edit.instructions ?? "",
           ...(edit.memory ? { memory: edit.memory } : {}),
+          ...(edit.tools ? { tools: edit.tools } : {}),
         });
         bus.publish({ type: "agents.changed" });
         return json(summary(agent), 201);
@@ -307,6 +310,7 @@ export function startHttp(options: HttpOptions): Server<undefined> {
       fast: agent.fast,
       instructions: agent.instructions,
       memory: agent.memory,
+      tools: agent.tools,
       network: agent.access.network,
       writableFolders: agent.access.writableFolders,
       harnessApps: agent.access.harnessApps,
@@ -337,6 +341,9 @@ export function startHttp(options: HttpOptions): Server<undefined> {
     }
     if (body.memory !== undefined) {
       edit.memory = readMemorySettingsPatch(body.memory);
+    }
+    if (body.tools !== undefined) {
+      edit.tools = readToolsPatch(body.tools);
     }
     return edit;
   }
@@ -449,6 +456,19 @@ function readMemorySettingsPatch(raw: unknown): Partial<AgentMemorySettings> {
   if (value.nudgeInterval !== undefined) {
     if (typeof value.nudgeInterval !== "number") throw new ChatError(400, "nudgeInterval must be a number.");
     patch.nudgeInterval = value.nudgeInterval;
+  }
+  return patch;
+}
+
+function readToolsPatch(raw: unknown): Partial<Record<StafToolId, boolean>> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ChatError(400, "Tools must be an object mapping tool IDs to true or false.");
+  }
+  const patch: Partial<Record<StafToolId, boolean>> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isStafToolId(key)) throw new ChatError(400, `Unknown Staf tool "${key}".`);
+    if (typeof val !== "boolean") throw new ChatError(400, `Tool "${key}" must be true or false.`);
+    patch[key] = val;
   }
   return patch;
 }

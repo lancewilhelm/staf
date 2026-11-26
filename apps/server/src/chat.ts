@@ -302,6 +302,7 @@ export class ChatService {
     if (
       trigger === "chat" &&
       this.memory &&
+      agent.tools.memory &&
       agent.memory.nudgeInterval > 0 &&
       userMessageCount % agent.memory.nudgeInterval === 0
     ) {

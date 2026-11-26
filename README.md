@@ -6,7 +6,7 @@ a simple chat interface in the browser and the terminal. Read the [specification
 
 Status: slices 1, 2, and 3 (3a and 3b) are done. Chat works in the web app and the CLI on
 all three harnesses. Agents are managed from the sidebar in their own panel (Profile,
-Scheduled tasks, and Memory), appearance and sidebar preferences sync on the host, threads
+Scheduled tasks, Memory, and Tools), appearance and sidebar preferences sync on the host, threads
 support message attachments and either an Inbox mode (with Working, Inbox, and Settled
 sections) or a plain Thread list mode, sidebar rows show working time, thread age, and
 pending memory proposals, each thread can switch provider, model, reasoning level, and fast

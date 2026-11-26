@@ -39,6 +39,7 @@ defaults shown.
 | `harnessApps` | `[]` | Apps that come with the harness account, by name or ID. See below. |
 | `writableFolders` | `[]` | Extra folders that the agent may write to, as absolute paths or paths starting with `~/`. |
 | `memory` | `{ notesLimit: 2200, profileLimit: 1375, nudgeInterval: 10 }` | Character limits for the agent's **About you** (`profile`) and **Agent notes** (`notes`) memory blocks, and how often (in person messages; `0` turns it off) Staf reminds the agent to consider saving memory. Editable in the agent panel's **Memory** tab or with `staf memory limits`. |
+| `tools` | `{}` | Per-agent overrides for built-in Staf MCP tools (`attach_file`, `memory`, `conversation_search`, `scheduled_tasks`). All built-in tools start enabled by default; set any key to `false` to restrict it, or toggle them in the agent panel's **Tools** tab. |
 
 If `agent.json` has a problem, Staf refuses to start a conversation with that agent and
 says what is wrong.
