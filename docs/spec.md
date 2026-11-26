@@ -136,9 +136,9 @@ the same way whichever harness made the call.
   Scheduled task runs carry a small schedule icon (such as a clock) so that they stand
   apart from threads that a person started. In **Settings → Appearance**, each person
   chooses between two sidebar modes:
-  - **Inbox mode:** threads that are answering right now sit in a **Working** section at
-    the top. The **Inbox** below holds only idle threads that nobody has settled yet, and
-    settled threads are tucked into a collapsible **Settled** section.
+  - **Inbox mode:** the **Inbox** sits up top with idle threads that nobody has settled
+    yet. Threads that are answering right now sit in a bottom-aligned **Working** section
+    just above the collapsible **Settled** section at the bottom.
   - **Thread list mode:** a typical chat list. Every thread, whether manual or scheduled,
     running or idle, appears in one list sorted by last activity. Settling does not apply
     in this mode, so the list has no Inbox or Settled sections.
@@ -262,8 +262,8 @@ Each slice is used live before the next one starts.
        `settledAt` state to threads (`PATCH /api/threads/:id` with `settled`, automatic
        unsettle on reply, schedule clock icon on scheduled runs), and add the **Sidebar**
        mode selector in **Settings → Appearance** to switch between **Inbox mode**
-       (a **Working** section for running threads, an **Inbox** of idle threads that are
-       not settled, and a collapsible **Settled** section) and **Thread list mode** (one
+       (the **Inbox** up top for idle threads that are not settled, with **Working** and a
+       collapsible **Settled** section anchored at the bottom) and **Thread list mode** (one
        chronological list of every thread).
      - **Working time and turn stats:** Show working time and thread age on sidebar
        rows and elapsed time on answers, and store per-answer stats and raw harness usage
@@ -285,10 +285,10 @@ Each slice is used live before the next one starts.
      - **First live scheduled task:** Port the `morning-intel` skill from Hermes into a
        local agent workspace and run it live.
 3. **The Staf MCP server and memory v1.** Run tokens, the first Staf tools (inbox
-   delivery, `memory`, `conversation_search`), and per-agent memory as designed in
-   [memory.md](memory.md), with memory blocks and limits in each agent's panel and
-   proposals surfacing as cards in threads and the Inbox. Check first that Claude's
-   `--safe-mode` accepts `--mcp-config`.
+   delivery, scheduled task tools so that an agent can manage its own schedules, `memory`,
+   and `conversation_search`), and per-agent memory as designed in [memory.md](memory.md),
+   with memory blocks and limits in each agent's panel and proposals surfacing as cards in
+   threads and the Inbox. Check first that Claude's `--safe-mode` accepts `--mcp-config`.
 4. **Gmail.** Setup, a trigger for new mail, inbox monitoring, the personal feed that
    `morning-intel` reads, and inline approval cards for sending mail in threads and the
    Inbox.

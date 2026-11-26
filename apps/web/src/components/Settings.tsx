@@ -133,7 +133,7 @@ const SIDEBAR_MODE_OPTIONS: Array<{ id: SidebarMode; label: string; hint: string
   {
     id: "inbox",
     label: "Inbox",
-    hint: "Active runs sit under Working; finished threads wait in your Inbox until settled",
+    hint: "Unaddressed threads stay up top in your Inbox; Working and Settled sit at the bottom",
   },
   {
     id: "list",

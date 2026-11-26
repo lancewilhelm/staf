@@ -29,6 +29,9 @@ bun run build          # compile the single binary to dist/staf
 - Harness adapters must not depend on a person's own harness setup. Use Staf's harness
   homes under `~/.staf/harness/`.
 - Never commit credentials. Never copy a harness's credentials file; sign in separately.
+- Never add telemetry, analytics, error-reporting SDKs, phone-home update checks, or
+  third-party CDN assets (such as remote fonts). All stats and logs stay strictly on the
+  host owner's machine.
 - Tests must not start a real harness. Use the fake harness, or recorded Codex messages.
 - Build in slices, as described in the spec, and use each slice live before the next.
 

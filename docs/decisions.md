@@ -3,14 +3,24 @@
 A short record of decisions and why they were made. Add an entry when a decision changes
 how Staf is built or used. Newest first.
 
-## 2026-11-26: Thread list mode is one plain list, and the Inbox gets a Working section
+## 2026-11-26: No outbound telemetry — all stats stay strictly local
+
+Staf never sends telemetry, analytics, crash reports, update pings, or third-party asset
+requests (such as remote fonts). Rich per-turn timing, step, and usage stats are recorded
+in the host owner's own `staf.db` and never leave that machine.
+
+Why: Staf is a personal, self-hosted assistant host. People who run it should be certain
+that neither Staf nor its dependencies phone home or collect data about how they use it.
+
+## 2026-11-26: Thread list mode is one plain list, and the Inbox gets a bottom-aligned Working and Settled dock
 
 **Thread list mode** now shows every thread, manual or scheduled, in one list sorted by
-last activity, with no Inbox or Settled sections. **Inbox mode** moves threads that are
-answering into a **Working** section at the top, so that the Inbox holds only idle threads
-that still need attention. Sidebar rows show how long a thread has been working or how long
-ago it last changed. Staf also stores stats for each answer (timing, steps, model, and token
-usage) in `staf.db`, and keeps each harness's raw usage payload out of the API.
+last activity, with no Inbox or Settled sections. **Inbox mode** keeps the **Inbox** up
+high with only idle threads that still need attention, and anchors **Working** (threads
+that are currently answering) above the collapsible **Settled** section at the bottom of
+the sidebar. Sidebar rows show how long a thread has been working or how long ago it last
+changed. Staf also stores stats for each answer (timing, steps, model, and token usage)
+in `staf.db`, and keeps each harness's raw usage payload out of the API.
 
 Why: the earlier Thread list mode mixed in an Inbox section for scheduled runs and a
 "Settled runs" section, which made it neither a plain chat list nor a real inbox. Settling

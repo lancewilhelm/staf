@@ -119,101 +119,107 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       </section>
 
       <nav className="thread-list" aria-label={isInboxMode ? "Inbox" : "Threads"}>
-        {working.length > 0 && (
-          <section className="sidebar-working-block" aria-label="Working">
-            <div className="sidebar-section-head">
-              <h2>
-                Working <span className="sidebar-count">{working.length}</span>
-              </h2>
-            </div>
-            {working.map((thread) => (
-              <ThreadRow
-                key={thread.id}
-                thread={thread}
-                active={thread.id === current}
-                owner={showingAll ? agentNames.get(thread.agentId) : undefined}
-                showSettle={false}
-                now={now}
-                onOpen={go}
-              />
-            ))}
-          </section>
-        )}
+        <div className="thread-list-main">
+          <div className="sidebar-section-head">
+            <h2>
+              {isInboxMode ? "Inbox" : "Threads"}
+              {isInboxMode && main.length > 0 && <span className="sidebar-count">{main.length}</span>}
+            </h2>
+            {agents.length > 1 && (
+              <button
+                type="button"
+                className={`sidebar-filter${showingAll ? " active" : ""}`}
+                aria-pressed={showingAll}
+                onClick={() => setShowAll((value) => !value)}
+                title={
+                  showingAll
+                    ? `Show only ${currentAgent?.name ?? "this agent"}'s threads`
+                    : "Show threads from all agents"
+                }
+              >
+                All agents
+              </button>
+            )}
+          </div>
 
-        <div className="sidebar-section-head">
-          <h2>
-            {isInboxMode ? "Inbox" : "Threads"}
-            {isInboxMode && main.length > 0 && <span className="sidebar-count">{main.length}</span>}
-          </h2>
-          {agents.length > 1 && (
-            <button
-              type="button"
-              className={`sidebar-filter${showingAll ? " active" : ""}`}
-              aria-pressed={showingAll}
-              onClick={() => setShowAll((value) => !value)}
-              title={
-                showingAll
-                  ? `Show only ${currentAgent?.name ?? "this agent"}'s threads`
-                  : "Show threads from all agents"
-              }
-            >
-              All agents
-            </button>
-          )}
-        </div>
-
-        {main.length === 0 ? (
-          <p className="thread-empty">{emptyMainText}</p>
-        ) : (
-          groupThreads(main, now).map(([label, items]) => (
-            <section key={label}>
-              <h3>{label}</h3>
-              {items.map((thread) => (
-                <ThreadRow
-                  key={thread.id}
-                  thread={thread}
-                  active={thread.id === current}
-                  owner={showingAll ? agentNames.get(thread.agentId) : undefined}
-                  showSettle={isInboxMode}
-                  now={now}
-                  onOpen={go}
-                />
-              ))}
-            </section>
-          ))
-        )}
-
-        {isInboxMode && settled.length > 0 && (
-          <section className="settled-group">
-            <button
-              type="button"
-              className={`settled-toggle${settledOpen ? " open" : ""}`}
-              aria-expanded={settledOpen}
-              onClick={() => setSettledOpen((value) => !value)}
-            >
-              <span className="chevron" aria-hidden="true">
-                <Icon name="chevron" size={13} />
-              </span>
-              <span>Settled</span>
-              <span className="sidebar-count">{settled.length}</span>
-            </button>
-            {settledOpen && (
-              <div className="settled-list">
-                {settled.map((thread) => (
+          {main.length === 0 ? (
+            <p className="thread-empty">{emptyMainText}</p>
+          ) : (
+            groupThreads(main, now).map(([label, items]) => (
+              <section key={label}>
+                <h3>{label}</h3>
+                {items.map((thread) => (
                   <ThreadRow
                     key={thread.id}
                     thread={thread}
                     active={thread.id === current}
                     owner={showingAll ? agentNames.get(thread.agentId) : undefined}
-                    showSettle
-                    muted
+                    showSettle={isInboxMode}
                     now={now}
                     onOpen={go}
                   />
                 ))}
-              </div>
+              </section>
+            ))
+          )}
+        </div>
+
+        {isInboxMode && (working.length > 0 || settled.length > 0) && (
+          <div className="sidebar-bottom-dock">
+            {working.length > 0 && (
+              <section className="sidebar-working-block" aria-label="Working">
+                <div className="sidebar-section-head">
+                  <h2>
+                    Working <span className="sidebar-count">{working.length}</span>
+                  </h2>
+                </div>
+                {working.map((thread) => (
+                  <ThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    active={thread.id === current}
+                    owner={showingAll ? agentNames.get(thread.agentId) : undefined}
+                    showSettle={false}
+                    now={now}
+                    onOpen={go}
+                  />
+                ))}
+              </section>
             )}
-          </section>
+
+            {settled.length > 0 && (
+              <section className="settled-group">
+                <button
+                  type="button"
+                  className={`settled-toggle${settledOpen ? " open" : ""}`}
+                  aria-expanded={settledOpen}
+                  onClick={() => setSettledOpen((value) => !value)}
+                >
+                  <span className="chevron" aria-hidden="true">
+                    <Icon name="chevron" size={13} />
+                  </span>
+                  <span>Settled</span>
+                  <span className="sidebar-count">{settled.length}</span>
+                </button>
+                {settledOpen && (
+                  <div className="settled-list">
+                    {settled.map((thread) => (
+                      <ThreadRow
+                        key={thread.id}
+                        thread={thread}
+                        active={thread.id === current}
+                        owner={showingAll ? agentNames.get(thread.agentId) : undefined}
+                        showSettle
+                        muted
+                        now={now}
+                        onOpen={go}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
         )}
       </nav>
 
