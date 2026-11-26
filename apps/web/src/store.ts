@@ -9,6 +9,7 @@ import {
   type StreamEvent,
   type ThreadSummary,
 } from "@staf/protocol";
+import { listenShared } from "./events.ts";
 import { useSyncExternalStore } from "react";
 
 export type Connection = "connecting" | "open" | "offline";
@@ -390,10 +391,7 @@ function apply(event: StreamEvent): void {
   switch (event.type) {
     case "ready":
       set({ connection: "open" });
-      void loadThreads().catch(report);
-      void loadHealth().catch(() => {});
-      void loadAgents().catch(() => {});
-      if (state.threadId) void loadThread(state.threadId);
+      loadEverything();
       return;
     case "thread.upserted":
       set((current) => ({
@@ -473,17 +471,29 @@ function apply(event: StreamEvent): void {
   }
 }
 
-/** Keeps one event stream open, and reconnects after a short wait when it drops. */
-async function listen(): Promise<void> {
-  for (;;) {
-    try {
-      for await (const event of api.events()) apply(event);
-    } catch {
-      // Reconnect below.
-    }
-    set({ connection: "offline" });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
+/** Loads the current state, after connecting or reconnecting, when events may have been missed. */
+function loadEverything(): void {
+  void loadThreads().catch(report);
+  void loadHealth().catch(() => {});
+  void loadAgents().catch(() => {});
+  if (state.threadId) void loadThread(state.threadId);
 }
 
-void listen();
+listenShared(api, {
+  event: apply,
+  offline: () => set({ connection: "offline" }),
+  joined: () => {
+    set({ connection: "open" });
+    loadEverything();
+  },
+});
+
+// Settings that this browser keeps apply to every open tab.
+window.addEventListener("storage", (event) => {
+  if (event.key === "staf.agent" && !state.threadId) {
+    const agentId = readSavedAgent();
+    set({ agentId, draft: lastChoice(agentId) });
+  } else if (event.key === LAST_CHOICE_KEY && !state.threadId) {
+    set({ draft: lastChoice(state.agentId) });
+  }
+});

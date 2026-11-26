@@ -383,7 +383,16 @@ function AppearancePane() {
               setSetting(theme.id);
             }}
           >
-            <span className={`theme-swatch ${theme.id}`} aria-hidden="true" />
+            <span className="theme-swatch" aria-hidden="true">
+              {theme.id === "system" ? (
+                <>
+                  <MiniScreen theme="light" />
+                  <MiniScreen theme="dark" />
+                </>
+              ) : (
+                <MiniScreen theme={theme.id} />
+              )}
+            </span>
             <span className="theme-label">{theme.label}</span>
             <span className="theme-hint">{theme.hint}</span>
           </button>
@@ -391,5 +400,19 @@ function AppearancePane() {
       </div>
       <p className="field-note">The theme is saved in this browser, so each device can have its own.</p>
     </div>
+  );
+}
+
+/** A tiny picture of the Staf screen in one theme. */
+function MiniScreen({ theme }: { theme: "light" | "dark" }) {
+  return (
+    <span className={`mini ${theme}`}>
+      <span className="mini-side" />
+      <span className="mini-main">
+        <span className="mini-line" />
+        <span className="mini-line short" />
+        <span className="mini-box" />
+      </span>
+    </span>
   );
 }

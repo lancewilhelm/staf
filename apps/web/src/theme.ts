@@ -49,6 +49,11 @@ export function applyTheme(setting: ThemeSetting = themeSetting()): void {
   bar.content = BAR_COLORS[theme];
 }
 
+// Another tab changed the setting.
+window.addEventListener("storage", (event) => {
+  if (event.key === KEY || event.key === null) applyTheme();
+});
+
 // Follow the system while the setting is "system".
 dark.addEventListener("change", () => {
   if (themeSetting() === "system") applyTheme("system");

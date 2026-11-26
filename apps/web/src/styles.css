@@ -1325,25 +1325,87 @@ button.link {
   box-shadow: 0 0 0 1px var(--link);
 }
 
-/* Small previews in each theme's own colors, whatever the current theme is. */
+/* Small pictures of the screen in each theme's own colors, whatever the current theme is. */
 .theme-swatch {
+  display: flex;
   width: 100%;
-  height: 54px;
+  height: 64px;
   margin-bottom: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.25);
+  overflow: hidden;
+  border: 1px solid rgba(128, 128, 128, 0.3);
   border-radius: 8px;
 }
 
-.theme-swatch.light {
-  background: linear-gradient(#ffffff, #ffffff) 12px 12px / 60% 10px no-repeat, #f7f7f5;
+.mini {
+  flex: 1;
+  display: flex;
+  min-width: 0;
 }
 
-.theme-swatch.dark {
-  background: linear-gradient(#2a2a2a, #2a2a2a) 12px 12px / 60% 10px no-repeat, #151515;
+.mini + .mini {
+  border-left: 1px solid rgba(128, 128, 128, 0.35);
 }
 
-.theme-swatch.system {
-  background: linear-gradient(105deg, #f7f7f5 50%, #151515 50%);
+.mini.light {
+  background: #f7f7f5;
+}
+
+.mini.dark {
+  background: #151515;
+}
+
+.mini-side {
+  width: 26%;
+}
+
+.mini.light .mini-side {
+  background: #efefec;
+}
+
+.mini.dark .mini-side {
+  background: #1b1b1b;
+}
+
+.mini-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 8px 8px;
+}
+
+.mini-line {
+  width: 80%;
+  height: 5px;
+  border-radius: 3px;
+}
+
+.mini-line.short {
+  width: 52%;
+}
+
+.mini.light .mini-line {
+  background: #d6d6d1;
+}
+
+.mini.dark .mini-line {
+  background: #3a3a38;
+}
+
+.mini-box {
+  margin-top: auto;
+  height: 13px;
+  border-radius: 7px;
+}
+
+.mini.light .mini-box {
+  border: 1px solid #e2e2de;
+  background: #ffffff;
+}
+
+.mini.dark .mini-box {
+  border: 1px solid #2c2c2b;
+  background: #1f1f1f;
 }
 
 .theme-label {
@@ -1569,7 +1631,7 @@ button.link {
   }
 
   .theme-swatch {
-    height: 36px;
+    height: 48px;
   }
 
   .field-row {
