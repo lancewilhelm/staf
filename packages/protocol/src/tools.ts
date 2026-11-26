@@ -78,3 +78,170 @@ export function isMcpToolEnabled(
   const def = STAF_TOOL_CATALOG.find((t) => t.id === id)!;
   return tools[id] ?? def.defaultEnabled;
 }
+
+export interface HarnessToolCapability {
+  id: string;
+  name: string;
+  description: string;
+  /** Exact built-in tool or app names exposed by this harness, when applicable. */
+  names?: readonly string[];
+  status: "enabled" | "limited" | "off";
+  statusLabel: string;
+}
+
+export interface HarnessToolsSummary {
+  harness: string;
+  harnessLabel: string;
+  capabilities: HarnessToolCapability[];
+  disabledNote: string;
+}
+
+/**
+ * Describes the built-in tools that an agent's selected harness exposes under Staf's
+ * sandbox and access settings.
+ */
+export function harnessToolsForAgent(agent: {
+  harness: string;
+  harnessLabel: string;
+  network: boolean;
+  writableFolders: string[];
+  harnessApps: string[];
+}): HarnessToolsSummary {
+  const extraFolders = agent.writableFolders.length;
+  const folderNote =
+    extraFolders > 0
+      ? `Workspace plus ${extraFolders} extra writable folder${extraFolders === 1 ? "" : "s"}.`
+      : "Confined to this agent's workspace folder.";
+
+  switch (agent.harness) {
+    case "codex":
+      return {
+        harness: agent.harness,
+        harnessLabel: agent.harnessLabel,
+        capabilities: [
+          {
+            id: "web_search",
+            name: "Web search",
+            description: "Live web search and page reading built into Codex.",
+            names: ["web_search"],
+            status: "enabled",
+            statusLabel: "On",
+          },
+          {
+            id: "shell",
+            name: "Shell commands",
+            description: agent.network
+              ? "Runs sandboxed commands inside the workspace with internet access."
+              : "Runs sandboxed commands inside the workspace with no internet access.",
+            names: ["shell"],
+            status: agent.network ? "enabled" : "limited",
+            statusLabel: agent.network ? "Internet on" : "Offline only",
+          },
+          {
+            id: "files",
+            name: "Workspace files",
+            description: `Reads and edits files. ${folderNote}`,
+            status: "enabled",
+            statusLabel: "On",
+          },
+          {
+            id: "apps",
+            name: "ChatGPT account apps",
+            description:
+              agent.harnessApps.length > 0
+                ? "Allowed connectors from Staf's ChatGPT account (non-destructive actions only)."
+                : "Account connectors (such as Gmail or Expedia) are turned off unless listed in agent.json.",
+            ...(agent.harnessApps.length > 0 ? { names: agent.harnessApps } : {}),
+            status: agent.harnessApps.length > 0 ? "limited" : "off",
+            statusLabel: agent.harnessApps.length > 0 ? "Read-only" : "Off",
+          },
+        ],
+        disabledNote: "Off in Staf: Codex memory, browser use, computer use, and Codex plugins.",
+      };
+
+    case "claude":
+      return {
+        harness: agent.harness,
+        harnessLabel: agent.harnessLabel,
+        capabilities: [
+          {
+            id: "web",
+            name: "Web search & fetch",
+            description: "Searches the web and fetches web pages.",
+            names: ["WebSearch", "WebFetch"],
+            status: "enabled",
+            statusLabel: "On",
+          },
+          {
+            id: "shell",
+            name: "Shell commands",
+            description: agent.network
+              ? "Runs sandboxed Bash commands with internet access."
+              : "Runs sandboxed Bash commands with no internet access.",
+            names: ["Bash"],
+            status: agent.network ? "enabled" : "limited",
+            statusLabel: agent.network ? "Internet on" : "Offline only",
+          },
+          {
+            id: "files",
+            name: "Workspace files",
+            description: `Reads, creates, and edits files. ${folderNote}`,
+            names: ["Read", "Edit", "Write"],
+            status: "enabled",
+            statusLabel: "On",
+          },
+          {
+            id: "skills",
+            name: "Skills",
+            description: "Loads skills placed in this agent's workspace.",
+            names: ["Skill"],
+            status: "enabled",
+            statusLabel: "On",
+          },
+        ],
+        disabledNote:
+          "Off in Staf: Claude auto-memory, personal CLAUDE.md, hooks, plugins, Chrome, personal MCP servers, and cloud tools.",
+      };
+
+    case "antigravity":
+      return {
+        harness: agent.harness,
+        harnessLabel: agent.harnessLabel,
+        capabilities: [
+          {
+            id: "web",
+            name: "Web search & fetch",
+            description: "Built-in web search and page reading.",
+            status: "enabled",
+            statusLabel: "On",
+          },
+          {
+            id: "shell",
+            name: "Shell commands",
+            description: "Runs commands inside Antigravity's sandbox. Commands cannot reach the internet.",
+            status: "limited",
+            statusLabel: "Offline only",
+          },
+          {
+            id: "files",
+            name: "Workspace files",
+            description:
+              extraFolders > 0
+                ? "Writes stay inside the workspace; extra writable folders in agent.json are read-only on Antigravity."
+                : "Reads and edits files inside this agent's workspace folder.",
+            status: extraFolders > 0 ? "limited" : "enabled",
+            statusLabel: extraFolders > 0 ? "Workspace only" : "On",
+          },
+        ],
+        disabledNote: "Off in Staf: sandbox bypass and personal GEMINI.md, hooks, or skills.",
+      };
+
+    default:
+      return {
+        harness: agent.harness,
+        harnessLabel: agent.harnessLabel,
+        capabilities: [],
+        disabledNote: `Built-in tools are controlled by the ${agent.harnessLabel} harness.`,
+      };
+  }
+}

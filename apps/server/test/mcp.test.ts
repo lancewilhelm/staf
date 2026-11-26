@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { StafClient, type StreamEvent } from "@staf/protocol";
+import { harnessToolsForAgent, StafClient, type StreamEvent } from "@staf/protocol";
 import { createApp, type App } from "../src/app.ts";
 import { resolvePaths } from "../src/config.ts";
 import type { HarnessAdapter, TurnOutcome, TurnRequest } from "../src/harness/types.ts";
@@ -390,6 +390,48 @@ describe("Staf MCP bridge and attach_file end-to-end", () => {
       await bridge.close();
       await app.chat.idle();
     }
+  });
+
+  test("harnessToolsForAgent describes built-in capabilities for Codex, Claude, and Antigravity", () => {
+    const codex = harnessToolsForAgent({
+      harness: "codex",
+      harnessLabel: "ChatGPT",
+      network: false,
+      writableFolders: ["/srv/notes"],
+      harnessApps: ["Expedia"],
+    });
+    expect(codex.capabilities.find((c) => c.id === "shell")?.statusLabel).toBe("Offline only");
+    expect(codex.capabilities.find((c) => c.id === "apps")).toMatchObject({
+      status: "limited",
+      names: ["Expedia"],
+    });
+
+    const claude = harnessToolsForAgent({
+      harness: "claude",
+      harnessLabel: "Claude",
+      network: true,
+      writableFolders: [],
+      harnessApps: [],
+    });
+    expect(claude.capabilities.flatMap((c) => c.names ?? [])).toEqual([
+      "WebSearch",
+      "WebFetch",
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Skill",
+    ]);
+
+    const agy = harnessToolsForAgent({
+      harness: "antigravity",
+      harnessLabel: "Gemini",
+      network: true,
+      writableFolders: ["/srv/notes"],
+      harnessApps: [],
+    });
+    expect(agy.capabilities.find((c) => c.id === "shell")?.statusLabel).toBe("Offline only");
+    expect(agy.capabilities.find((c) => c.id === "files")?.statusLabel).toBe("Workspace only");
   });
 });
 
