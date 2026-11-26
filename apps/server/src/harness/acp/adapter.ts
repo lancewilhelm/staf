@@ -238,6 +238,7 @@ export class AcpAdapter implements HarnessAdapter {
 
     let sessionId = request.sessionId;
     let input = request.input;
+    let recovered = false;
     if (sessionId && !this.loaded.has(sessionId)) {
       try {
         const loaded = await rpc.request<{ models?: SessionModels } | null>("session/load", { ...sessionParams, sessionId });
@@ -247,6 +248,7 @@ export class AcpAdapter implements HarnessAdapter {
         if (!(error instanceof RpcError)) throw error;
         // The saved session is gone. A new one gets the conversation so far.
         sessionId = null;
+        recovered = true;
         input = request.inputWithHistory ?? request.input;
       }
     }
@@ -282,7 +284,7 @@ export class AcpAdapter implements HarnessAdapter {
         sessionId,
         prompt: [{ type: "text", text: input }],
       });
-      const report = buildAcpReport(result, this.sessionModels.get(sessionId) ?? null);
+      const report = buildAcpReport(result, this.sessionModels.get(sessionId) ?? null, recovered);
       const outcome = outcomeFor(result.stopReason, request.signal.aborted, report);
       if (outcome.status === "completed" && !turn.answer.text.trim() && turn.refused.length > 0) {
         // ACP agents end the turn when a permission is refused, without saying why.
@@ -459,6 +461,7 @@ function outcomeFor(stopReason: string, aborted: boolean, report?: TurnUsageRepo
 function buildAcpReport(
   result: { stopReason: string; usage?: Record<string, unknown> },
   resolvedModel: string | null,
+  recovered = false,
 ): TurnUsageReport {
   const raw = result.usage && typeof result.usage === "object" ? result.usage : null;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
@@ -486,6 +489,7 @@ function buildAcpReport(
     : undefined;
   return {
     ...(resolvedModel ? { resolvedModel } : {}),
+    ...(recovered ? { sessionAction: "recovered" } : {}),
     stopReason: result.stopReason,
     ...(usage && Object.keys(usage).length > 0 ? { usage } : {}),
     ...(raw ? { providerMeta: { stopReason: result.stopReason, usage: raw } } : {}),

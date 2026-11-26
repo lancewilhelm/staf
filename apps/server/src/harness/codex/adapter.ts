@@ -39,6 +39,9 @@ interface ActiveTurn {
   streamed: Set<string>;
   wroteAnswer: boolean;
   lastError: string | null;
+  resolvedModel: string | null;
+  recovered: boolean;
+  modelCalls: number;
   report?: TurnUsageReport;
   /** The thread's token totals before this turn, worked out from the first usage update. */
   usageBase?: Record<string, number>;
@@ -216,23 +219,28 @@ export class CodexAdapter implements HarnessAdapter {
 
     let threadId = request.sessionId;
     let input = request.input;
+    let threadModel: string | null = null;
+    let recovered = false;
     if (threadId && !this.loaded.has(threadId)) {
       try {
-        await rpc.request<ThreadResponse>("thread/resume", {
+        const resumed = await rpc.request<ThreadResponse>("thread/resume", {
           ...threadOptions,
           threadId,
           excludeTurns: true,
         });
+        threadModel = resumed.model ?? null;
       } catch (error) {
         // The saved Codex thread is gone. Continue in a new one that gets the conversation so far.
         if (!(error instanceof RpcError)) throw error;
         threadId = null;
+        recovered = true;
         input = request.inputWithHistory ?? request.input;
       }
     }
     if (!threadId) {
       const started = await rpc.request<ThreadResponse>("thread/start", threadOptions);
       threadId = started.thread.id;
+      threadModel = started.model ?? null;
       request.emit({ type: "session", sessionId: threadId });
     }
     this.loaded.add(threadId);
@@ -250,6 +258,9 @@ export class CodexAdapter implements HarnessAdapter {
         streamed: new Set(),
         wroteAnswer: false,
         lastError: null,
+        resolvedModel: threadModel,
+        recovered,
+        modelCalls: 0,
         finish: (result) => {
           if (this.turns.get(turn.threadId) !== turn) return;
           this.turns.delete(turn.threadId);
@@ -261,7 +272,7 @@ export class CodexAdapter implements HarnessAdapter {
         if (turn.turnId) {
           rpc
             .request("turn/interrupt", { threadId: turn.threadId, turnId: turn.turnId })
-            .catch(() => turn.finish({ status: "interrupted" }));
+            .catch(() => turn.finish({ status: "interrupted", report: buildCodexReport(turn, "interrupted") }));
         }
       };
       this.turns.set(turn.threadId, turn);
@@ -275,6 +286,7 @@ export class CodexAdapter implements HarnessAdapter {
       const models = await this.listModels().catch(() => [] as ModelInfo[]);
       const info = request.model ? models.find((m) => m.id === request.model) : models.find((m) => m.isDefault);
       const model = request.model ?? info?.id ?? null;
+      if (model) turn.resolvedModel = model;
       const effort =
         request.effort && info?.efforts?.includes(request.effort) ? request.effort : (info?.defaultEffort ?? null);
       const started = await rpc.request<TurnStartResponse>("turn/start", {
@@ -427,13 +439,14 @@ export class CodexAdapter implements HarnessAdapter {
       case "thread/tokenUsage/updated": {
         const parsed = parseCodexUsage(params, turn.usageBase);
         turn.usageBase = parsed.base;
+        turn.modelCalls += 1;
         turn.report = parsed.report;
         break;
       }
       case "turn/completed": {
         const { turn: done } = params as TurnCompletedNotification;
         if (turn.turnId && done.id !== turn.turnId) break;
-        const report = turn.report ? { ...turn.report, stopReason: done.status } : { stopReason: done.status };
+        const report = buildCodexReport(turn, done.status);
         if (done.status === "interrupted") turn.finish({ status: "interrupted", report });
         else if (done.status === "failed") {
           turn.finish({
@@ -518,6 +531,9 @@ export function codexThreadConfig(
 
   const config: Record<string, unknown> = {
     web_search: "live",
+    analytics: {
+      enabled: false,
+    },
     features: {
       apps: ids.length > 0,
       plugins: false,
@@ -689,5 +705,15 @@ export function parseCodexUsage(
       ...(Object.keys(tokenUsage).length > 0 ? { providerMeta: { tokenUsage } } : {}),
     },
     ...(start ? { base: start } : {}),
+  };
+}
+
+function buildCodexReport(turn: ActiveTurn, stopReason: string): TurnUsageReport {
+  return {
+    ...(turn.report ?? {}),
+    stopReason,
+    ...(turn.resolvedModel ? { resolvedModel: turn.resolvedModel } : {}),
+    ...(turn.modelCalls > 0 ? { turns: turn.modelCalls } : {}),
+    ...(turn.recovered ? { sessionAction: "recovered" } : {}),
   };
 }

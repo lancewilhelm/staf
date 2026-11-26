@@ -6,8 +6,11 @@ how Staf is built or used. Newest first.
 ## 2026-11-26: No outbound telemetry — all stats stay strictly local
 
 Staf never sends telemetry, analytics, crash reports, update pings, or third-party asset
-requests (such as remote fonts). Rich per-turn timing, step, and usage stats are recorded
-in the host owner's own `staf.db` and never leave that machine.
+requests (such as remote fonts). When Staf spawns child harnesses, it also passes their
+documented opt-out flags (`analytics.enabled = false` for Codex; `DISABLE_TELEMETRY=1`,
+`DISABLE_ERROR_REPORTING=1`, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` for Claude
+Code). Rich per-turn timing, step, session, and usage stats are recorded in the host
+owner's own `staf.db` and never leave that machine.
 
 Why: Staf is a personal, self-hosted assistant host. People who run it should be certain
 that neither Staf nor its dependencies phone home or collect data about how they use it.

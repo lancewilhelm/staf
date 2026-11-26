@@ -372,6 +372,7 @@ export class ChatService {
     let text = "";
     const activities: Activity[] = [];
     let firstTokenAt: number | null = null;
+    let firstActivityAt: number | null = null;
     let lastSave = Date.now();
     const live = { text, activities };
     this.live.set(message.id, live);
@@ -401,6 +402,7 @@ export class ChatService {
           this.bus.publish({ type: "message.text", threadId, messageId: message.id, text });
           return;
         case "activity": {
+          if (firstActivityAt === null) firstActivityAt = Date.now();
           const activity = mergeActivity(activities, event.activity);
           this.bus.publish({ type: "message.activity", threadId, messageId: message.id, activity });
           save();
@@ -444,11 +446,16 @@ export class ChatService {
       }
     }
     const report = outcome.report;
+    const sessionAction =
+      report?.sessionAction ??
+      (input.sessionId ? "resumed" : input.inputWithHistory ? "handoff" : "new");
     const meta: StoredMessageMeta = {
       durationMs: Math.max(0, now - message.createdAt),
       ...(firstTokenAt !== null ? { firstTokenMs: Math.max(0, firstTokenAt - message.createdAt) } : {}),
+      ...(firstActivityAt !== null ? { firstActivityMs: Math.max(0, firstActivityAt - message.createdAt) } : {}),
       ...(report?.apiDurationMs !== undefined ? { apiDurationMs: report.apiDurationMs } : {}),
       stepCount: activities.length,
+      sessionAction,
       effort: input.effort,
       fast: input.fast,
       resolvedModel: report?.resolvedModel ?? input.model,

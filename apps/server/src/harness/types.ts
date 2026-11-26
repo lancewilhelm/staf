@@ -1,9 +1,10 @@
-import type { Activity, HarnessInfo, ModelInfo, TokenUsage } from "@staf/protocol";
+import type { Activity, HarnessInfo, ModelInfo, SessionAction, TokenUsage } from "@staf/protocol";
 import type { AgentAccess } from "../agents.ts";
 
 /** Harness-reported timing, model, and usage metadata captured during a turn. */
 export interface TurnUsageReport {
   apiDurationMs?: number;
+  sessionAction?: SessionAction;
   resolvedModel?: string | null;
   stopReason?: string | null;
   turns?: number;

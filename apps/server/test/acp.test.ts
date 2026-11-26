@@ -128,7 +128,10 @@ describe("Antigravity over ACP", () => {
   test("starts a new session when the saved one is gone", async () => {
     const { adapter, workspace, sent } = setup("missing-session");
     const { request, events } = turn(workspace, { sessionId: "gone", inputWithHistory: "HISTORY + Weather?" });
-    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
+    expect(await adapter.runTurn(request)).toMatchObject({
+      status: "completed",
+      report: { sessionAction: "recovered" },
+    });
     expect(events[0]).toEqual({ type: "session", sessionId: "session-1" });
     expect(sent().find((m) => m.method === "session/prompt")!.params.prompt[0].text).toBe("HISTORY + Weather?");
   });

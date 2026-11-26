@@ -140,7 +140,15 @@ describe("CodexAdapter", () => {
     const { adapter, requests } = setup("missing-thread");
     const { request, events } = turn({ sessionId: "thread-gone", inputWithHistory: "HISTORY + What leads AP?" });
 
-    expect(await adapter.runTurn(request)).toMatchObject({ status: "completed" });
+    const outcome = await adapter.runTurn(request);
+    expect(outcome).toMatchObject({
+      status: "completed",
+      report: {
+        sessionAction: "recovered",
+        resolvedModel: "gpt-a",
+        turns: 2,
+      },
+    });
     expect(events[0]).toEqual({ type: "session", sessionId: "thread-1" });
     // The new session gets the conversation so far.
     expect(requests().find((r) => r.method === "turn/start")!.params.input[0].text).toBe("HISTORY + What leads AP?");
@@ -231,8 +239,9 @@ describe("codexThreadConfig", () => {
     { id: "connector_expedia", name: "Expedia", accessible: true },
   ];
 
-  test("turns Codex's own memory and browser features off", () => {
+  test("turns Codex's own memory, browser, and analytics features off", () => {
     const { config } = codexThreadConfig({ network: true, harnessApps: [], writableFolders: [] }, []);
+    expect(config.analytics).toEqual({ enabled: false });
     expect(config.features).toMatchObject({ memories: false, browser_use: false, in_app_browser: false, computer_use: false });
   });
 

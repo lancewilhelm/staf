@@ -2,7 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, claudeModels, ClaudeAdapter, claudeSettings, CLAUDE_TOOLS } from "../src/harness/claude/adapter.ts";
+import {
+  claudeArgs,
+  claudeModels,
+  ClaudeAdapter,
+  claudeSettings,
+  CLAUDE_QUIET_ENV,
+  CLAUDE_TOOLS,
+} from "../src/harness/claude/adapter.ts";
 import type { HarnessEvent, TurnRequest } from "../src/harness/types.ts";
 
 const fixture = join(import.meta.dir, "fixtures", "fake-claude.ts");
@@ -104,7 +111,7 @@ describe("ClaudeAdapter", () => {
     expect(calls()).toHaveLength(2);
     expect(calls()[1]!.args).not.toContain("--resume");
     expect(calls()[1]!.prompt).toBe("HISTORY + What day is it?");
-    expect(outcome).toMatchObject({ status: "completed" });
+    expect(outcome).toMatchObject({ status: "completed", report: { sessionAction: "recovered" } });
     expect(events.find((e) => e.type === "session")).toEqual({ type: "session", sessionId: "claude-session-1" });
   });
 
@@ -142,6 +149,11 @@ describe("claudeArgs", () => {
     expect(args[args.indexOf("--add-dir") + 1]).toBe("/srv/notes");
     expect(args).not.toContain("--resume");
     expect(JSON.parse(args[args.indexOf("--settings") + 1]!)).toEqual(claudeSettings({ network: false, harnessApps: [], writableFolders: [] }));
+    expect(CLAUDE_QUIET_ENV).toEqual({
+      DISABLE_TELEMETRY: "1",
+      DISABLE_ERROR_REPORTING: "1",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    });
   });
 
   test("opens the sandbox network only when the agent allows it", () => {

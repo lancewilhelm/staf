@@ -26,6 +26,13 @@ export interface ClaudeOptions {
 export const CLAUDE_NOTE =
   "Uses this computer's Claude Code sign-in, and Claude Code keeps its own copy of each conversation in ~/.claude.";
 
+/** Environment variables that keep Claude Code from sending product telemetry or error reports. */
+export const CLAUDE_QUIET_ENV: Record<string, string> = {
+  DISABLE_TELEMETRY: "1",
+  DISABLE_ERROR_REPORTING: "1",
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+};
+
 /**
  * Used when Claude Code cannot list its models. It accepts these aliases and maps them to
  * the newest model of each family.
@@ -202,7 +209,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         "--settings",
         JSON.stringify({ fastMode: true }),
       ],
-      { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "ignore" },
+      { cwd: tmpdir(), stdin: "pipe", stdout: "pipe", stderr: "ignore", env: { ...process.env, ...CLAUDE_QUIET_ENV } },
     );
     const timer = setTimeout(() => proc.kill(), PROBE_TIMEOUT_MS);
     try {
@@ -267,7 +274,12 @@ export class ClaudeAdapter implements HarnessAdapter {
     if (this.signIn && Date.now() - this.signIn.at < SIGN_IN_TTL_MS) return this.signIn.signedIn;
     let signedIn: boolean | undefined;
     try {
-      const proc = Bun.spawn(["claude", "auth", "status"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const proc = Bun.spawn(["claude", "auth", "status"], {
+        stdout: "pipe",
+        stderr: "ignore",
+        stdin: "ignore",
+        env: { ...process.env, ...CLAUDE_QUIET_ENV },
+      });
       const timer = setTimeout(() => proc.kill(), 5000);
       const text = await new Response(proc.stdout).text();
       clearTimeout(timer);
@@ -289,7 +301,11 @@ export class ClaudeAdapter implements HarnessAdapter {
       if (first.missingSession && request.sessionId) {
         // The saved session is gone. Continue in a new one.
         const input = request.inputWithHistory ?? request.input;
-        return (await this.runOnce({ ...request, input }, null)).outcome;
+        const retry = (await this.runOnce({ ...request, input }, null)).outcome;
+        return {
+          ...retry,
+          report: { ...(retry.report ?? {}), sessionAction: "recovered" },
+        };
       }
       return first.outcome;
     } catch (error) {
@@ -309,7 +325,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env: { ...process.env, ...CLAUDE_QUIET_ENV },
     });
     proc.stdin.write(request.input);
     await proc.stdin.end();

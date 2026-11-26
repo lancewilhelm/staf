@@ -110,15 +110,23 @@ describe("chat over HTTP", () => {
     const answer = detail.messages[1]!;
     expect(answer.stats).toMatchObject({
       stepCount: 1,
+      sessionAction: "new",
       resolvedModel: "fake-small",
       stopReason: "end_turn",
       usage: { inputTokens: 2, totalTokens: 5 },
     });
+    expect(answer.stats!.firstActivityMs).toBeGreaterThanOrEqual(0);
     expect(answer.stats!.durationMs).toBeGreaterThanOrEqual(answer.stats!.firstTokenMs!);
     expect(answer.stats).not.toHaveProperty("providerMeta");
     // The raw payload stays in the database for later analysis.
     expect(app.store.getMessageMeta(answer.id)?.providerMeta).toEqual({ fake: true });
     expect(detail.messages[0]!.stats).toBeUndefined();
+
+    // A follow-up on the same harness records a resumed session.
+    await client.sendMessage(thread.id, "Again");
+    await app.chat.idle();
+    const second = (await client.getThread(thread.id)).messages[3]!;
+    expect(second.stats?.sessionAction).toBe("resumed");
   });
 
   test("records a harness failure on the message", async () => {
@@ -323,12 +331,14 @@ describe("changing the harness of a conversation", () => {
     expect(beta.requests[1]!.input).toBe("Thanks");
 
     const detail = await client.getThread(thread.id);
-    expect(detail.messages.filter((m) => m.role === "assistant").map((m) => `${m.harness}/${m.model}`)).toEqual([
+    const answers = detail.messages.filter((m) => m.role === "assistant");
+    expect(answers.map((m) => `${m.harness}/${m.model}`)).toEqual([
       "alpha/null",
       "alpha/fake-large",
       "beta/null",
       "beta/null",
     ]);
+    expect(answers.map((m) => m.stats?.sessionAction)).toEqual(["new", "resumed", "handoff", "resumed"]);
 
     await client.deleteThread(thread.id);
     expect(alpha.deleted).toHaveLength(1);

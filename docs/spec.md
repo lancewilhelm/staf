@@ -146,11 +146,13 @@ the same way whichever harness made the call.
   long it has been working (such as "3m"), and an idle thread shows how long ago it last
   changed (such as "2h"). In a thread, the step summary and the thinking indicator show the
   elapsed time of the answer.
-- **Turn stats:** Staf records stats for each answer in `staf.db`: duration, time to first
-  token, step count, the resolved model, the stop reason, and token usage and cost when the
-  harness reports them. The raw usage payload from each harness is kept only in the
-  database for later analysis. Clients receive the normalized stats on each message, but
-  the web app does not show them yet. Per-provider usage views come in a later slice.
+- **Turn stats:** Staf records foundational stats for each answer in `staf.db`: duration,
+  time to first token, time to first activity, step count, session action (`new`,
+  `resumed`, `handoff`, or `recovered`), model-call turns, reasoning effort, fast mode,
+  the resolved model, the stop reason, and token usage and cost when the harness reports
+  them. The raw usage payload from each harness is kept only in the database for later
+  analysis. Clients receive the normalized stats on each message, but the web app does not
+  show them yet. Per-provider usage views come in a later slice.
 - **Agent panel** (slice 2): Each agent's own settings (profile, instructions, defaults,
   access summary, and scheduled tasks — and later memory and integrations) open in an
   agent-specific popup or drawer from the sidebar rather than crowding global Settings.

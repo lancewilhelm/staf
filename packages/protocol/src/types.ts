@@ -86,12 +86,17 @@ export interface TokenUsage {
   contextWindow?: number;
 }
 
+/** How a turn obtained its harness session. */
+export type SessionAction = "new" | "resumed" | "handoff" | "recovered";
+
 /** Normalized timing and usage stats recorded for an assistant turn. */
 export interface MessageStats {
   durationMs: number;
   firstTokenMs?: number;
+  firstActivityMs?: number;
   apiDurationMs?: number;
   stepCount: number;
+  sessionAction?: SessionAction;
   effort?: string | null;
   fast?: boolean;
   resolvedModel?: string | null;

@@ -25,6 +25,7 @@ export interface ThreadResumeParams extends ThreadOptions {
 
 export interface ThreadResponse {
   thread: { id: string };
+  model?: string;
 }
 
 export interface TurnStartParams {
