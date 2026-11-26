@@ -17,6 +17,18 @@ conversations in a mixed list. Filtering by the current agent matches how people
 separate assistants to work, while the "All agents" toggle keeps recent chats across all
 agents one click away without adding heavy controls.
 
+## 2026-11-25: The new-chat hero shows the agent's name in a selectable display font
+
+The new-chat screen displays the current agent's name as its heading instead of "What do
+you want to know?". **Settings → Appearance** lets each browser choose between five
+heading fonts: Bricolage Grotesque (default), Space Grotesk, System sans, Fraunces Soft,
+and System serif. The three non-system fonts are bundled as static Latin WOFF2 files
+(~70 KB total) inside the binary rather than loaded from Google Fonts at runtime.
+
+Why: a question prompt does not fit action requests, while the agent's name makes clear
+who is about to respond even when the sidebar is closed on a phone. Bundling static
+subsets keeps the app offline-friendly and loads only the chosen font at runtime.
+
 ## 2026-11-25: Fast mode is off by default
 
 Agents and conversations can turn on a harness's fast mode, but it starts off, and Staf

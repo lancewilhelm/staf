@@ -218,8 +218,10 @@ Each slice is used live before the next one starts.
        agent, an "All agents" toggle shows conversations across all agents with the
        owning agent's name under each title.
      - The pill under the composer keeps only the provider, model, reasoning level, and
-       fast mode. On a new chat with more than one agent, the chat screen shows the
-       current agent above the heading and in the composer placeholder.
+       fast mode. On a new chat, the hero shows the current agent's name instead of a
+       generic prompt. **Settings → Appearance** lets each browser pick the hero heading
+       font from five bundled and system options (Bricolage Grotesque, Space Grotesk,
+       System sans, Fraunces Soft, and System serif).
      - On phones, the agents sit in the same slide-out sidebar above the conversations.
 2. **Jobs and the inbox.** Schedules, job runs, inbox items with attachments, and a port of the `morning-intel` skill from Hermes. Jobs run on Codex or
    Claude; Staf refuses to schedule a job on Antigravity for now (see

@@ -15,7 +15,14 @@ import {
 } from "../store.ts";
 import { FastSwitch } from "./ChatPill.tsx";
 import { Icon } from "./Icon.tsx";
-import { setThemeSetting, type ThemeSetting, themeSetting } from "../theme.ts";
+import {
+  type HeroFont,
+  heroFontSetting,
+  setHeroFontSetting,
+  setThemeSetting,
+  type ThemeSetting,
+  themeSetting,
+} from "../theme.ts";
 
 /** The settings window: agents and providers. */
 export function Settings({ view }: { view: SettingsView }) {
@@ -365,8 +372,31 @@ const THEMES: Array<{ id: ThemeSetting; label: string; hint: string }> = [
   { id: "dark", label: "Dark", hint: "Always dark" },
 ];
 
+const HERO_FONTS: Array<{ id: HeroFont; label: string; hint: string }> = [
+  { id: "bricolage", label: "Bricolage Grotesque", hint: "Sans-serif · Expressive" },
+  { id: "space-grotesk", label: "Space Grotesk", hint: "Sans-serif · Geometric" },
+  { id: "sans", label: "System sans", hint: "Sans-serif · Neutral" },
+  { id: "fraunces", label: "Fraunces Soft", hint: "Serif · Warm display" },
+  { id: "serif", label: "System serif", hint: "Serif · Classic" },
+];
+
 function AppearancePane() {
   const [setting, setSetting] = useState<ThemeSetting>(themeSetting);
+  const [font, setFont] = useState<HeroFont>(heroFontSetting);
+  const sample = useStore((s) => {
+    const thread = s.threads.find((t) => t.id === s.threadId);
+    return s.agents.find((a) => a.id === (thread?.agentId ?? s.agentId))?.name ?? "Staf";
+  });
+
+  useEffect(() => {
+    const sync = () => {
+      setSetting(themeSetting());
+      setFont(heroFontSetting());
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+
   return (
     <div className="appearance-pane">
       <h3>Theme</h3>
@@ -398,7 +428,33 @@ function AppearancePane() {
           </button>
         ))}
       </div>
-      <p className="field-note">The theme is saved in this browser, so each device can have its own.</p>
+
+      <h3 className="appearance-heading">Heading font</h3>
+      <div className="font-options" role="radiogroup" aria-label="Heading font">
+        {HERO_FONTS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="radio"
+            aria-checked={font === item.id}
+            className={`theme-option font-option${font === item.id ? " selected" : ""}`}
+            onClick={() => {
+              setHeroFontSetting(item.id);
+              setFont(item.id);
+            }}
+          >
+            <span className={`font-swatch font-sample-${item.id}`} aria-hidden="true">
+              {sample}
+            </span>
+            <span className="theme-label">{item.label}</span>
+            <span className="theme-hint">{item.hint}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="field-note">
+        Theme and heading font are saved in this browser, so each device can have its own.
+      </p>
     </div>
   );
 }

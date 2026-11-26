@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ThreadSummary } from "@staf/protocol";
 import { activeAgentId, agentInitial, groupThreads, runningAgents, visibleThreads } from "../src/sidebar.ts";
+import { DEFAULT_HERO_FONT, parseHeroFont } from "../src/theme.ts";
 
 function makeThread(overrides: Partial<ThreadSummary> & { id: string }): ThreadSummary {
   return {
@@ -71,5 +72,15 @@ describe("sidebar helpers", () => {
       ["Older", ["older"]],
     ]);
     expect(groupThreads([threads[0]!, threads[3]!], noon).map(([label]) => label)).toEqual(["Today", "Older"]);
+  });
+
+  test("parseHeroFont accepts known fonts and falls back to the default", () => {
+    expect(parseHeroFont("bricolage")).toBe("bricolage");
+    expect(parseHeroFont("space-grotesk")).toBe("space-grotesk");
+    expect(parseHeroFont("sans")).toBe("sans");
+    expect(parseHeroFont("fraunces")).toBe("fraunces");
+    expect(parseHeroFont("serif")).toBe("serif");
+    expect(parseHeroFont("unknown")).toBe(DEFAULT_HERO_FONT);
+    expect(parseHeroFont(null)).toBe(DEFAULT_HERO_FONT);
   });
 });

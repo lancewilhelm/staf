@@ -35,15 +35,15 @@ export function ChatView() {
   };
 
   if (!threadId || (messages.length === 0 && !thread)) {
+    const heading = currentAgent?.name ?? "Staf";
     return (
       <main className="chat empty">
         <div className="hero">
-          {agents.length > 1 && currentAgent && <p className="hero-agent">{currentAgent.name}</p>}
-          <h1>What do you want to know?</h1>
+          <h1>{heading}</h1>
           <Composer
             running={false}
             autoFocus
-            placeholder={agents.length > 1 && currentAgent ? `Ask ${currentAgent.name}` : "Ask anything"}
+            placeholder={currentAgent ? `Message ${currentAgent.name}` : "Message Staf"}
             onSend={(text) => void sendMessage(text)}
             onStop={() => {}}
           />

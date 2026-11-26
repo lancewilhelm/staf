@@ -1,0 +1,7 @@
+The bundled hero heading fonts in this folder are static Latin-subset WOFF2 files
+from Google Fonts, each licensed under the SIL Open Font License, Version 1.1
+(https://openfontlicense.org/):
+
+- bricolage-grotesque.woff2 — Bricolage Grotesque (opsz 96, weight 600), Mathieu Triay
+- space-grotesk.woff2       — Space Grotesk (weight 500), Florian Karsten
+- fraunces-soft.woff2       — Fraunces (opsz 144, weight 520, SOFT 100, WONK 1), Undercase Type
