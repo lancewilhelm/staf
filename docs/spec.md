@@ -312,6 +312,10 @@ Later:
 - **Sub-tasks and agent-to-agent collaboration** (studying how harnesses and hosts such
   as T3 Code orchestrate sub-tasks; letting agents coordinate with one another and join
   group threads in both thread mode and single-stream mode).
+- **Staf-native skills and optional core tool replacements** (skills owned by Staf that
+  work identically across Codex, Claude, and Antigravity without depending on a person's
+  harness setup, plus letting people optionally switch built-in harness core tools such as
+  web search or file/shell tools to Staf's own implementations).
 - A larger memory system with benchmarks (see [memory.md](memory.md)), importing memories
   from other assistants, voice, an Expo app, Hermes as a harness, and more plugins.
 
